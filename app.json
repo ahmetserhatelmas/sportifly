@@ -1,13 +1,20 @@
 {
   "expo": {
-    "name": "sportifly",
+    "name": "Sportifly",
     "slug": "sportifly",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "primaryColor": "#52C5B6",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.x4se.sportifly",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Sportifly, gönderi ve profil fotoğrafı paylaşabilmen için galerine erişir.",
+        "NSCameraUsageDescription": "Sportifly, profil ve gönderi fotoğrafı çekebilmen için kamerana erişir.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -16,10 +23,30 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ],
+      "package": "com.x4se.sportifly"
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "@react-native-community/datetimepicker",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Sportifly, gönderi ve profil fotoğrafı paylaşabilmen için galerine erişir."
+        }
+      ],
+      "expo-font"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "7aba8c51-6da2-4092-ae50-8a131cc593db"
+      }
+    },
+    "owner": "4se"
   }
 }

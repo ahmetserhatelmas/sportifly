@@ -10,6 +10,9 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.x4se.sportifly",
+      "entitlements": {
+        "aps-environment": "production"
+      },
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Sportifly, gönderi ve profil fotoğrafı paylaşabilmen için galerine erişir.",
         "NSCameraUsageDescription": "Sportifly, profil ve gönderi fotoğrafı çekebilmen için kamerana erişir.",
@@ -17,17 +20,18 @@
       }
     },
     "android": {
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "backgroundColor": "#52C5B6",
+        "foregroundImage": "./assets/android-icon-foreground.png"
       },
       "predictiveBackGestureEnabled": false,
       "permissions": [
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.POST_NOTIFICATIONS"
       ],
-      "package": "com.x4se.sportifly"
+      "package": "com.x4se.sportifly",
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -40,7 +44,24 @@
           "photosPermission": "Sportifly, gönderi ve profil fotoğrafı paylaşabilmen için galerine erişir."
         }
       ],
-      "expo-font"
+      "expo-font",
+      [
+        "expo-notifications",
+        {
+          "color": "#52C5B6",
+          "defaultChannel": "reservations"
+        }
+      ],
+      "expo-asset",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#52C5B6",
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 240,
+          "resizeMode": "contain"
+        }
+      ]
     ],
     "extra": {
       "eas": {

@@ -13,12 +13,24 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '../../components/Avatar';
 import { Button } from '../../components/Button';
-import { DateTimeField } from '../../components/DateTimeField';
+import { EmptyState } from '../../components/EmptyState';
 import { Input } from '../../components/Input';
 import { Stars } from '../../components/Stars';
 import { useAuth } from '../../context/AuthContext';
-import { formatSlot, generateSlots, hourLabel, parseHour, slotHour } from '../../lib/booking';
+import { fetchBlockedIds } from '../../lib/chatModeration';
+import {
+  bookingDates,
+  dateChipLabel,
+  formatOpenDays,
+  formatSlot,
+  generateSlots,
+  hourRangeLabel,
+  parseHour,
+  parseOpenDays,
+  slotHour,
+} from '../../lib/booking';
 import { localDateString } from '../../lib/duelTime';
+import { pushBookerAfterDecision, pushOwnerAfterBooking } from '../../lib/push';
 import { supabase } from '../../lib/supabase';
 import { RootStackParamList } from '../../navigation/types';
 import { colors, shadow } from '../../theme';
@@ -40,6 +52,7 @@ export function ListingDetailScreen({ route, navigation }: Props) {
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedHour, setSelectedHour] = useState<number | null>(null);
   const [bookedHours, setBookedHours] = useState<number[]>([]);
+  const [loaded, setLoaded] = useState(false);
 
   const fetchAll = useCallback(async () => {
     const [{ data: listingData }, { data: reviewData }, { data: purchaseData }] =
@@ -56,10 +69,14 @@ export function ListingDetailScreen({ route, navigation }: Props) {
           .eq('listing_id', listingId)
           .order('created_at', { ascending: false }),
       ]);
-    setListing(listingData as Listing);
-    setReviews((reviewData as ListingReview[]) ?? []);
+    const blocked = session?.user.id
+      ? await fetchBlockedIds(session.user.id)
+      : new Set<string>();
+    setListing((listingData as Listing) ?? null);
+    setReviews(((reviewData as ListingReview[]) ?? []).filter((r) => !blocked.has(r.user_id)));
     setPurchases((purchaseData as Purchase[]) ?? []);
-  }, [listingId]);
+    setLoaded(true);
+  }, [listingId, session?.user.id]);
 
   const fetchBooked = useCallback(async (date: Date) => {
     const { data } = await supabase.rpc('listing_booked_slots', {
@@ -78,7 +95,14 @@ export function ListingDetailScreen({ route, navigation }: Props) {
     }, [fetchAll, fetchBooked, selectedDate])
   );
 
-  if (!listing) return <SafeAreaView style={styles.safe} />;
+  if (!loaded) return <SafeAreaView style={styles.safe} />;
+  if (!listing) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <EmptyState icon="ban-outline" title="Bu ilan kullanılamıyor" />
+      </SafeAreaView>
+    );
+  }
 
   const isField = listing.type === 'field';
   const isOwner = listing.owner_id === session?.user.id;
@@ -90,8 +114,22 @@ export function ListingDetailScreen({ route, navigation }: Props) {
   const canReview = myPurchases.some((p) => p.status === 'accepted');
   const openHour = parseHour(listing.open_hour, 8);
   const closeHour = parseHour(listing.close_hour, 22);
-  const dateStr = selectedDate ? localDateString(selectedDate) : null;
-  const availableHours = dateStr ? generateSlots(openHour, closeHour, dateStr) : [];
+  const openDays = parseOpenDays(listing.open_days);
+  const upcomingDates = bookingDates(openDays);
+  const viewDate = selectedDate ?? (isOwner ? upcomingDates[0] ?? null : null);
+  const dateStr = viewDate ? localDateString(viewDate) : null;
+  const availableHours = dateStr
+    ? generateSlots(openHour, closeHour, dateStr, { includePast: isOwner })
+    : [];
+
+  const hourPurchases = (hour: number) =>
+    purchases.filter(
+      (p) =>
+        p.slot_date?.slice(0, 10) === dateStr &&
+        p.slot_time &&
+        slotHour(p.slot_time) === hour &&
+        p.status !== 'rejected'
+    );
 
   const sendRequest = async () => {
     if (!session) return;
@@ -99,29 +137,42 @@ export function ListingDetailScreen({ route, navigation }: Props) {
       Alert.alert('Saat seç', 'Önce bir tarih, sonra müsait bir saat seç.');
       return;
     }
+    if (!upcomingDates.some((d) => localDateString(d) === localDateString(selectedDate))) {
+      Alert.alert('Tarih', 'Yalnızca önümüzdeki 1 hafta ve ilanın açık günleri seçilebilir.');
+      return;
+    }
     setBusy(true);
-    const { error } = await supabase.from('purchases').insert({
-      user_id: session.user.id,
-      listing_id: listingId,
-      slot_date: localDateString(selectedDate),
-      slot_time: `${String(selectedHour).padStart(2, '0')}:00:00`,
-    });
+    const { data: created, error } = await supabase
+      .from('purchases')
+      .insert({
+        user_id: session.user.id,
+        listing_id: listingId,
+        slot_date: localDateString(selectedDate),
+        slot_time: `${String(selectedHour).padStart(2, '0')}:00:00`,
+      })
+      .select('id')
+      .single();
     setBusy(false);
     if (error) {
       Alert.alert(
         'İşlem başarısız',
         error.code === '23505'
           ? 'Bu saat az önce doldu, başka bir saat seç.'
-          : 'Bir hata oluştu, tekrar deneyin.'
+          : error.message?.includes('hafta')
+            ? 'En fazla 1 hafta sonrası için talep atılabilir.'
+            : error.message?.includes('müsait')
+              ? 'Bu günde ilan müsait değil.'
+              : 'Bir hata oluştu, tekrar deneyin.'
       );
       if (selectedDate) fetchBooked(selectedDate);
     } else {
+      if (created?.id) void pushOwnerAfterBooking(created.id);
       setSelectedHour(null);
       fetchAll();
       if (selectedDate) fetchBooked(selectedDate);
       Alert.alert(
         'Talebin gönderildi',
-        'İlan sahibine bildirim gitti. Onayladığında mesaj olarak da haberdar olursun.'
+        'İlan sahibinin telefonuna bildirim gitti. Onayladığında sen de haberdar olursun.'
       );
     }
   };
@@ -155,7 +206,9 @@ export function ListingDetailScreen({ route, navigation }: Props) {
     if (error) {
       Alert.alert('İşlem başarısız', 'Bir hata oluştu, tekrar deneyin.');
     } else {
+      void pushBookerAfterDecision(purchase.id);
       fetchAll();
+      if (selectedDate) fetchBooked(selectedDate);
     }
   };
 
@@ -187,6 +240,132 @@ export function ListingDetailScreen({ route, navigation }: Props) {
     }
   };
 
+  const pickDate = (d: Date) => {
+    setSelectedDate(d);
+    setSelectedHour(null);
+    fetchBooked(d);
+  };
+
+  const ownerScheduleBlock = () => {
+    if (!isOwner) return null;
+    return (
+      <View style={styles.bookingCard}>
+        <Text style={styles.bookingTitle}>
+          {isField ? 'Saha takvimi' : 'Ders takvimi'}
+        </Text>
+        <Text style={styles.bookingHint}>
+          Önümüzdeki 7 gün · {formatOpenDays(openDays)}. Boş, bekleyen talep ve dolu saatleri buradan görürsün.
+        </Text>
+        <View style={styles.legendRow}>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border }]} />
+            <Text style={styles.legendText}>Boş</Text>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: '#FEF3C7' }]} />
+            <Text style={styles.legendText}>Bekliyor</Text>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: '#FEE2E2' }]} />
+            <Text style={styles.legendText}>Dolu</Text>
+          </View>
+        </View>
+        {upcomingDates.length === 0 ? (
+          <Text style={styles.noSlots}>Bu hafta açık gün yok.</Text>
+        ) : (
+          <View style={styles.dateGrid}>
+            {upcomingDates.map((d) => {
+              const key = localDateString(d);
+              const selected = dateStr === key;
+              return (
+                <Pressable
+                  key={key}
+                  onPress={() => pickDate(d)}
+                  style={[styles.dateChip, selected && styles.dateChipSelected]}
+                >
+                  <Text style={[styles.dateChipText, selected && styles.dateChipTextSelected]}>
+                    {dateChipLabel(d)}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
+        {viewDate ? (
+          availableHours.length === 0 ? (
+            <Text style={styles.noSlots}>Bu günde saat aralığı yok.</Text>
+          ) : (
+            <View style={styles.slotGrid}>
+              {availableHours.map((h) => {
+                const rows = hourPurchases(h);
+                const accepted = rows.find((p) => p.status === 'accepted');
+                const pending = rows.filter((p) => p.status === 'pending');
+                const isPast =
+                  dateStr === localDateString() && h <= new Date().getHours();
+                const state = accepted ? 'full' : pending.length > 0 ? 'pending' : isPast ? 'past' : 'empty';
+                const who = accepted?.profiles?.username ?? pending[0]?.profiles?.username;
+                const label =
+                  state === 'full'
+                    ? `Dolu${who ? ` · ${who}` : ''}`
+                    : state === 'pending'
+                      ? pending.length > 1
+                        ? `Bekliyor · ${pending.length} talep`
+                        : `Bekliyor${who ? ` · ${who}` : ''}`
+                      : isPast
+                        ? 'Geçti'
+                        : 'Boş';
+                return (
+                  <Pressable
+                    key={h}
+                    onPress={() => {
+                      if (accepted) {
+                        Alert.alert(hourRangeLabel(h), `${who ?? 'Kullanıcı'} bu saati aldı.`);
+                      } else if (pending.length > 0) {
+                        Alert.alert(
+                          hourRangeLabel(h),
+                          pending.map((p) => p.profiles?.username ?? 'Kullanıcı').join(', ') +
+                            ' onay bekliyor. Aşağıdaki gelen taleplerden karar verebilirsin.'
+                        );
+                      }
+                    }}
+                    style={[
+                      styles.slot,
+                      styles.ownerSlot,
+                      state === 'full' && styles.slotFull,
+                      state === 'pending' && styles.slotPending,
+                      state === 'past' && styles.slotPast,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.slotText,
+                        state === 'full' && { color: colors.danger },
+                        state === 'pending' && { color: '#B45309' },
+                        state === 'past' && { color: colors.textMuted },
+                      ]}
+                    >
+                      {hourRangeLabel(h)}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.slotStatus,
+                        state === 'full' && { color: colors.danger },
+                        state === 'pending' && { color: '#B45309' },
+                        state === 'past' && { color: colors.textMuted },
+                      ]}
+                    >
+                      {label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )
+        ) : null}
+      </View>
+    );
+  };
+
   const bookingBlock = () => {
     if (isOwner) return null;
     return (
@@ -195,19 +374,34 @@ export function ListingDetailScreen({ route, navigation }: Props) {
           {isField ? 'Saat seç ve kirala' : 'Saat seç ve ders talep et'}
         </Text>
         <Text style={styles.bookingHint}>
-          Tarih seç, müsait saatler aşağıda görünsün. Dolu saatler kilitlenir.
+          Her seans 1 saat. Yalnızca önümüzdeki 7 gün ve açık günler ({formatOpenDays(openDays)})
+          seçilebilir. İlan sahibi onaylayınca o saat başkasına kapanır.
         </Text>
-        <DateTimeField
-          label="Tarih"
-          placeholder="Gün seç"
-          mode="date"
-          value={selectedDate}
-          onChange={(d) => {
-            setSelectedDate(d);
-            setSelectedHour(null);
-            fetchBooked(d);
-          }}
-        />
+        {upcomingDates.length === 0 ? (
+          <Text style={styles.noSlots}>Bu hafta müsait gün yok.</Text>
+        ) : (
+          <View style={styles.dateGrid}>
+            {upcomingDates.map((d) => {
+              const key = localDateString(d);
+              const selected = dateStr === key;
+              return (
+                <Pressable
+                  key={key}
+                  onPress={() => {
+                    setSelectedDate(d);
+                    setSelectedHour(null);
+                    fetchBooked(d);
+                  }}
+                  style={[styles.dateChip, selected && styles.dateChipSelected]}
+                >
+                  <Text style={[styles.dateChipText, selected && styles.dateChipTextSelected]}>
+                    {dateChipLabel(d)}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
         {selectedDate ? (
           availableHours.length === 0 ? (
             <Text style={styles.noSlots}>Bu günde müsait saat kalmadı.</Text>
@@ -242,7 +436,7 @@ export function ListingDetailScreen({ route, navigation }: Props) {
                         taken && !mine && styles.slotTextTaken,
                       ]}
                     >
-                      {hourLabel(h)}
+                      {hourRangeLabel(h)}
                     </Text>
                   </Pressable>
                 );
@@ -255,7 +449,7 @@ export function ListingDetailScreen({ route, navigation }: Props) {
         <Button
           title={
             selectedHour != null
-              ? `${hourLabel(selectedHour)} için ${isField ? 'kiralama' : 'ders'} talebi`
+              ? `${hourRangeLabel(selectedHour)} için ${isField ? 'kiralama' : 'ders'} talebi`
               : isField
                 ? 'Kiralama Talebi Gönder'
                 : 'Ders Talebi Gönder'
@@ -342,11 +536,23 @@ export function ListingDetailScreen({ route, navigation }: Props) {
             <Text style={styles.priceLabel}>{isField ? 'Kiralama Ücreti' : 'Ders Ücreti'}</Text>
             <Text style={styles.price}>
               {Number(listing.price).toLocaleString('tr-TR')} ₺
-              <Text style={styles.priceUnit}>{isField ? ' /saat' : ' /ders'}</Text>
+              <Text style={styles.priceUnit}> /saat</Text>
             </Text>
           </View>
 
+          {ownerScheduleBlock()}
           {bookingBlock()}
+
+          {isOwner && (
+            <Button
+              title="İlanı Düzenle"
+              variant="outline"
+              onPress={() =>
+                navigation.navigate('CreateListing', { type: listing.type, listingId: listing.id })
+              }
+              style={{ marginTop: 16 }}
+            />
+          )}
 
           {isOwner && (
             <Button
@@ -515,10 +721,27 @@ const styles = StyleSheet.create({
   },
   bookingTitle: { fontSize: 16, fontWeight: '800', color: colors.text, marginBottom: 4 },
   bookingHint: { fontSize: 13, color: colors.textSecondary, lineHeight: 18, marginBottom: 12 },
-  slotGrid: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 8 },
+  legendRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 12 },
+  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  legendDot: { width: 12, height: 12, borderRadius: 4 },
+  legendText: { fontSize: 12, fontWeight: '600', color: colors.textSecondary },
+  dateGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
+  dateChip: {
+    paddingHorizontal: 12,
+    height: 36,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.background,
+  },
+  dateChipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
+  dateChipText: { fontSize: 13, fontWeight: '700', color: colors.text },
+  dateChipTextSelected: { color: '#fff' },
+  slotGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 8 },
   slot: {
-    width: '23%',
-    marginRight: '2.66%',
+    width: '48%',
     marginBottom: 8,
     height: 40,
     borderRadius: 10,
@@ -531,7 +754,12 @@ const styles = StyleSheet.create({
   slotSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
   slotTaken: { opacity: 0.4 },
   slotMine: { borderColor: colors.primary, backgroundColor: colors.primarySoft, opacity: 1 },
+  ownerSlot: { height: 52, paddingHorizontal: 8 },
+  slotPending: { backgroundColor: '#FEF3C7', borderColor: '#F59E0B' },
+  slotFull: { backgroundColor: '#FEE2E2', borderColor: '#FECACA' },
+  slotPast: { opacity: 0.45 },
   slotText: { fontSize: 13, fontWeight: '700', color: colors.text },
+  slotStatus: { fontSize: 11, fontWeight: '600', color: colors.textSecondary, marginTop: 2 },
   slotTextSelected: { color: '#fff' },
   slotTextTaken: { textDecorationLine: 'line-through', color: colors.textMuted },
   noSlots: { fontSize: 13, color: colors.textMuted, marginBottom: 12 },

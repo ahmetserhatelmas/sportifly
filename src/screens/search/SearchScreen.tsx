@@ -22,6 +22,7 @@ import { RoleBadges } from '../../components/RoleBadges';
 import { Select } from '../../components/Select';
 import { useAuth } from '../../context/AuthContext';
 import { CITIES, getDistricts } from '../../data/locations';
+import { fetchBlockedIds } from '../../lib/chatModeration';
 import { isDuelUpcoming, localDateString } from '../../lib/duelTime';
 import { supabase } from '../../lib/supabase';
 import { RootStackParamList } from '../../navigation/types';
@@ -41,6 +42,7 @@ export function SearchScreen() {
   const [sport, setSport] = useState<string | null>(null);
   const [city, setCity] = useState<string | null>(null);
   const [district, setDistrict] = useState<string | null>(null);
+  const [lobbyFilter, setLobbyFilter] = useState<'all' | 'open' | 'full'>('all');
 
   const [query, setQuery] = useState('');
   const [people, setPeople] = useState<Profile[]>([]);
@@ -58,7 +60,10 @@ export function SearchScreen() {
     if (city) q = q.eq('city', city);
     if (district) q = q.eq('district', district);
 
-    const { data, error } = await q;
+    const [{ data, error }, blocked] = await Promise.all([
+      q,
+      session?.user.id ? fetchBlockedIds(session.user.id) : Promise.resolve(new Set<string>()),
+    ]);
     if (error) {
       setDuels([]);
       return;
@@ -66,6 +71,7 @@ export function SearchScreen() {
     setDuels(
       (data ?? [])
         .filter((d: any) => isDuelUpcoming(d.match_date, d.start_time))
+        .filter((d: any) => !blocked.has(d.creator_id))
         .map((d: any) => ({
           ...d,
           participant_count: d.duel_participants?.length ?? 0,
@@ -94,10 +100,15 @@ export function SearchScreen() {
         .order('username', { ascending: true })
         .limit(30);
 
-      if (!error) setPeople((data as Profile[]) ?? []);
+      if (!error) {
+        const blocked = session?.user.id
+          ? await fetchBlockedIds(session.user.id)
+          : new Set<string>();
+        setPeople(((data as Profile[]) ?? []).filter((p) => !blocked.has(p.id)));
+      }
       setSearching(false);
     },
-    []
+    [session?.user.id]
   );
 
   useFocusEffect(
@@ -120,6 +131,15 @@ export function SearchScreen() {
   };
 
   const districts = useMemo(() => (city ? getDistricts(city) : []), [city]);
+
+  const visibleDuels = useMemo(() => {
+    return duels.filter((d) => {
+      const full = (d.participant_count ?? 0) >= d.max_players;
+      if (lobbyFilter === 'full') return full;
+      if (lobbyFilter === 'open') return !full;
+      return true;
+    });
+  }, [duels, lobbyFilter]);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -199,15 +219,45 @@ export function SearchScreen() {
             )}
           </View>
 
+          <View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.chips}
+            >
+              <Chip
+                label="Hepsi"
+                selected={lobbyFilter === 'all'}
+                onPress={() => setLobbyFilter('all')}
+              />
+              <Chip
+                label="Açık lobi"
+                selected={lobbyFilter === 'open'}
+                onPress={() => setLobbyFilter('open')}
+              />
+              <Chip
+                label="Dolu lobi"
+                selected={lobbyFilter === 'full'}
+                onPress={() => setLobbyFilter('full')}
+              />
+            </ScrollView>
+          </View>
+
           <FlatList
-            data={duels}
+            data={visibleDuels}
             keyExtractor={(item) => item.id}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
             contentContainerStyle={{ paddingTop: 8, paddingBottom: 100 }}
             ListEmptyComponent={
               <EmptyState
                 icon="search-outline"
-                title="Aktif düello bulunamadı"
+                title={
+                  lobbyFilter === 'full'
+                    ? 'Dolu lobi yok'
+                    : lobbyFilter === 'open'
+                      ? 'Açık lobi yok'
+                      : 'Aktif düello bulunamadı'
+                }
                 subtitle="Filtreleri değiştirmeyi dene veya kendi düellonu oluştur."
               />
             }

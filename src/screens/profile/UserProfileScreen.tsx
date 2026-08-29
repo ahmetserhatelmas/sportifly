@@ -1,6 +1,8 @@
+import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useCallback, useLayoutEffect, useState } from 'react';
 import {
+  Alert,
   FlatList,
   Image,
   Pressable,
@@ -10,12 +12,25 @@ import {
 } from 'react-native';
 import { Avatar } from '../../components/Avatar';
 import { Button } from '../../components/Button';
+import { DuelCard } from '../../components/DuelCard';
+import { EmptyState } from '../../components/EmptyState';
+import { PhotoLightbox } from '../../components/PhotoLightbox';
 import { RoleBadges } from '../../components/RoleBadges';
 import { useAuth } from '../../context/AuthContext';
+import {
+  blockUser,
+  fetchBlockedIds,
+  fetchMutedPartners,
+  getBlockState,
+  muteConversation,
+  unblockUser,
+  unmuteConversation,
+} from '../../lib/chatModeration';
+import { fetchUpcomingMatches } from '../../lib/matches';
 import { supabase } from '../../lib/supabase';
 import { RootStackParamList } from '../../navigation/types';
 import { colors } from '../../theme';
-import { Post, Profile } from '../../types';
+import { Duel, Post, Profile } from '../../types';
 import { useFocusEffect } from '@react-navigation/native';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'UserProfile'>;
@@ -26,13 +41,35 @@ export function UserProfileScreen({ route, navigation }: Props) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [stats, setStats] = useState({ followers: 0, played: 0, won: 0 });
   const [posts, setPosts] = useState<Post[]>([]);
+  const [upcoming, setUpcoming] = useState<Duel[]>([]);
+  const [photoOpen, setPhotoOpen] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [hidden, setHidden] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [blockState, setBlockState] = useState<'none' | 'blocked_by_me' | 'blocked_me'>('none');
+  const [muted, setMuted] = useState(false);
 
   const isMe = session?.user.id === userId;
+  const blockedByMe = blockState === 'blocked_by_me';
 
   const fetchData = useCallback(async () => {
-    const [profileRes, followers, played, won, postsRes, followRes] = await Promise.all([
+    let block: 'none' | 'blocked_by_me' | 'blocked_me' = 'none';
+    if (session && session.user.id !== userId) {
+      block = await getBlockState(session.user.id, userId);
+      setBlockState(block);
+      if (block === 'blocked_me') {
+        setProfile(null);
+        setHidden(true);
+        setLoaded(true);
+        return;
+      }
+    } else {
+      setBlockState('none');
+    }
+
+    const blocked = session?.user.id ? await fetchBlockedIds(session.user.id) : new Set<string>();
+    const [profileRes, followers, played, won, postsRes, followRes, matches] = await Promise.all([
       supabase.from('profiles').select('*').eq('id', userId).single(),
       supabase.from('follows').select('*', { count: 'exact', head: true }).eq('following_id', userId),
       supabase
@@ -51,15 +88,31 @@ export function UserProfileScreen({ route, navigation }: Props) {
             .select('follower_id')
             .match({ follower_id: session.user.id, following_id: userId })
         : Promise.resolve({ data: null }),
+      fetchUpcomingMatches(userId, blocked),
     ]);
+    if (!profileRes.data) {
+      setProfile(null);
+      setHidden(true);
+      setLoaded(true);
+      return;
+    }
+    setHidden(false);
     setProfile(profileRes.data as Profile);
     setStats({
       followers: followers.count ?? 0,
       played: played.count ?? 0,
       won: won.count ?? 0,
     });
-    setPosts((postsRes.data as Post[]) ?? []);
+    setPosts(block === 'blocked_by_me' ? [] : ((postsRes.data as Post[]) ?? []));
+    setUpcoming(block === 'blocked_by_me' ? [] : matches);
     setIsFollowing(Boolean(followRes.data && (followRes.data as any[]).length > 0));
+    if (session && session.user.id !== userId) {
+      const mutes = await fetchMutedPartners(session.user.id);
+      setMuted(mutes.has(userId));
+    } else {
+      setMuted(false);
+    }
+    setLoaded(true);
   }, [userId, session]);
 
   useFocusEffect(
@@ -68,9 +121,106 @@ export function UserProfileScreen({ route, navigation }: Props) {
     }, [fetchData])
   );
 
+  const confirmBlock = useCallback(() => {
+    if (!session || !profile) return;
+    Alert.alert(
+      'Engelle',
+      `@${profile.username} engellensin mi? Birbirinizi akış, arama ve sohbette göremezsiniz.`,
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Engelle',
+          style: 'destructive',
+          onPress: async () => {
+            setBusy(true);
+            const { error } = await blockUser(session.user.id, userId);
+            setBusy(false);
+            if (error) {
+              Alert.alert('Engel', 'İşlem yapılamadı.');
+              return;
+            }
+            fetchData();
+          },
+        },
+      ]
+    );
+  }, [session, profile, userId, fetchData]);
+
+  const toggleMute = useCallback(async () => {
+    if (!session) return;
+    const { error } = muted
+      ? await unmuteConversation(session.user.id, userId)
+      : await muteConversation(session.user.id, userId);
+    if (error) {
+      Alert.alert('Sessize al', 'İşlem yapılamadı.');
+      return;
+    }
+    setMuted(!muted);
+  }, [session, userId, muted]);
+
+  const confirmUnblock = useCallback(() => {
+    if (!session || !profile) return;
+    Alert.alert('Engeli kaldır', `@${profile.username} engeli kaldırılsın mı?`, [
+      { text: 'Vazgeç', style: 'cancel' },
+      {
+        text: 'Kaldır',
+        onPress: async () => {
+          setBusy(true);
+          const { error } = await unblockUser(session.user.id, userId);
+          setBusy(false);
+          if (error) {
+            Alert.alert('Engel', 'İşlem yapılamadı.');
+            return;
+          }
+          fetchData();
+        },
+      },
+    ]);
+  }, [session, profile, userId, fetchData]);
+
   useLayoutEffect(() => {
+    if (hidden) {
+      navigation.setOptions({ title: 'Hesap', headerRight: undefined });
+      return;
+    }
     if (profile) navigation.setOptions({ title: `@${profile.username}` });
-  }, [navigation, profile]);
+    if (isMe || !session || !profile) {
+      navigation.setOptions({ headerRight: undefined });
+      return;
+    }
+    navigation.setOptions({
+      headerRight: () => (
+        <Pressable
+          onPress={() =>
+            Alert.alert(`@${profile.username}`, undefined, [
+              { text: 'Vazgeç', style: 'cancel' },
+              {
+                text: muted ? 'Sesi aç' : 'Sessize al',
+                onPress: toggleMute,
+              },
+              blockedByMe
+                ? { text: 'Engeli kaldır', onPress: confirmUnblock }
+                : { text: 'Engelle', style: 'destructive', onPress: confirmBlock },
+            ])
+          }
+          hitSlop={8}
+        >
+          <Ionicons name="ellipsis-horizontal" size={22} color={colors.text} />
+        </Pressable>
+      ),
+    });
+  }, [
+    navigation,
+    profile,
+    hidden,
+    isMe,
+    session,
+    blockedByMe,
+    muted,
+    confirmBlock,
+    confirmUnblock,
+    toggleMute,
+  ]);
 
   const toggleFollow = async () => {
     if (!session) return;
@@ -89,7 +239,14 @@ export function UserProfileScreen({ route, navigation }: Props) {
     fetchData();
   };
 
-  if (!profile) return <View style={styles.container} />;
+  if (!loaded) return <View style={styles.container} />;
+  if (hidden || !profile) {
+    return (
+      <View style={styles.container}>
+        <EmptyState icon="ban-outline" title="Bu hesap kullanılamıyor" />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -109,7 +266,12 @@ export function UserProfileScreen({ route, navigation }: Props) {
 
             <View style={styles.avatarWrap}>
               <View style={styles.avatarBorder}>
-                <Avatar uri={profile.avatar_url} name={profile.username} size={92} />
+                <Avatar
+                  uri={profile.avatar_url}
+                  name={profile.username}
+                  size={92}
+                  onPress={profile.avatar_url ? () => setPhotoOpen(true) : undefined}
+                />
               </View>
             </View>
 
@@ -123,7 +285,19 @@ export function UserProfileScreen({ route, navigation }: Props) {
             />
             {profile.bio ? <Text style={styles.bio}>{profile.bio}</Text> : null}
 
-            {!isMe && (
+            {!isMe && blockedByMe && (
+              <View style={styles.actions}>
+                <Button
+                  title="Engeli Kaldır"
+                  variant="outline"
+                  onPress={confirmUnblock}
+                  loading={busy}
+                  style={{ flex: 1, height: 44 }}
+                />
+              </View>
+            )}
+
+            {!isMe && !blockedByMe && (
               <View style={styles.actions}>
                 <Button
                   title={isFollowing ? 'Takibi Bırak' : 'Takip Et'}
@@ -148,26 +322,48 @@ export function UserProfileScreen({ route, navigation }: Props) {
               </View>
             )}
 
-            <View style={styles.statsCard}>
-              <View style={styles.stat}>
-                <Text style={styles.statValue}>{stats.played}</Text>
-                <Text style={styles.statLabel}>Maç sayısı</Text>
-              </View>
-              <View style={[styles.stat, styles.statMiddle]}>
-                <Text style={[styles.statValue, { fontSize: 24 }]}>{stats.followers}</Text>
-                <Text style={styles.statLabel}>Takipçi</Text>
-              </View>
-              <View style={styles.stat}>
-                <Text style={styles.statValue}>{stats.won}</Text>
-                <Text style={styles.statLabel}>Kazanılan</Text>
-              </View>
-            </View>
+            {blockedByMe ? (
+              <Text style={styles.blockedNote}>Bu kullanıcıyı engelledin.</Text>
+            ) : (
+              <>
+                <View style={styles.statsCard}>
+                  <View style={styles.stat}>
+                    <Text style={styles.statValue}>{stats.played}</Text>
+                    <Text style={styles.statLabel}>Maç sayısı</Text>
+                  </View>
+                  <View style={[styles.stat, styles.statMiddle]}>
+                    <Text style={[styles.statValue, { fontSize: 24 }]}>{stats.followers}</Text>
+                    <Text style={styles.statLabel}>Takipçi</Text>
+                  </View>
+                  <View style={styles.stat}>
+                    <Text style={styles.statValue}>{stats.won}</Text>
+                    <Text style={styles.statLabel}>Kazanılan</Text>
+                  </View>
+                </View>
 
-            <Text style={styles.galleryTitle}>Paylaşımlar</Text>
+                {upcoming.length > 0 ? (
+                  <View>
+                    <Text style={styles.sectionTitle}>Katıldığı maçlar</Text>
+                    {upcoming.map((duel) => (
+                      <DuelCard
+                        key={duel.id}
+                        duel={duel}
+                        compact
+                        onPress={() => navigation.navigate('DuelDetail', { duelId: duel.id })}
+                      />
+                    ))}
+                  </View>
+                ) : null}
+
+                <Text style={styles.galleryTitle}>Paylaşımlar</Text>
+              </>
+            )}
           </>
         }
         ListEmptyComponent={
-          <Text style={styles.emptyGallery}>Henüz fotoğraf paylaşmamış.</Text>
+          blockedByMe ? null : (
+            <Text style={styles.emptyGallery}>Henüz fotoğraf paylaşmamış.</Text>
+          )
         }
         renderItem={({ item }) => (
           <Pressable
@@ -177,6 +373,11 @@ export function UserProfileScreen({ route, navigation }: Props) {
             <Image source={{ uri: item.image_url }} style={styles.gridImageInner} />
           </Pressable>
         )}
+      />
+      <PhotoLightbox
+        uri={profile.avatar_url}
+        visible={photoOpen}
+        onClose={() => setPhotoOpen(false)}
       />
     </View>
   );
@@ -203,6 +404,13 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   actions: { flexDirection: 'row', paddingHorizontal: 16, marginTop: 16 },
+  blockedNote: {
+    textAlign: 'center',
+    color: colors.textSecondary,
+    fontSize: 13,
+    marginTop: 12,
+    paddingHorizontal: 32,
+  },
   statsCard: {
     flexDirection: 'row',
     backgroundColor: colors.background,
@@ -219,6 +427,14 @@ const styles = StyleSheet.create({
   },
   statValue: { fontSize: 19, fontWeight: '800', color: colors.text },
   statLabel: { fontSize: 12, color: colors.textSecondary, marginTop: 4 },
+  sectionTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: colors.text,
+    paddingHorizontal: 16,
+    marginTop: 24,
+    marginBottom: 10,
+  },
   galleryTitle: {
     fontSize: 17,
     fontWeight: '800',

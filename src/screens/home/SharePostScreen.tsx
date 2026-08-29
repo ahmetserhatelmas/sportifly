@@ -6,6 +6,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Avatar } from '../../components/Avatar';
 import { EmptyState } from '../../components/EmptyState';
 import { useAuth } from '../../context/AuthContext';
+import { fetchBlockedIds } from '../../lib/chatModeration';
 import { supabase } from '../../lib/supabase';
 import { RootStackParamList } from '../../navigation/types';
 import { colors } from '../../theme';
@@ -36,8 +37,11 @@ export function SharePostScreen({ route, navigation }: Props) {
       setFriends([]);
       return;
     }
-    const { data: profiles } = await supabase.from('profiles').select('*').in('id', ids);
-    setFriends((profiles as Profile[]) ?? []);
+    const [{ data: profiles }, blocked] = await Promise.all([
+      supabase.from('profiles').select('*').in('id', ids),
+      fetchBlockedIds(me),
+    ]);
+    setFriends(((profiles as Profile[]) ?? []).filter((p) => !blocked.has(p.id)));
   }, [session]);
 
   useFocusEffect(

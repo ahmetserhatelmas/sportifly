@@ -5,6 +5,8 @@ import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '../../components/Avatar';
 import { EmptyState } from '../../components/EmptyState';
+import { useAuth } from '../../context/AuthContext';
+import { fetchBlockedIds } from '../../lib/chatModeration';
 import { supabase } from '../../lib/supabase';
 import { RootStackParamList } from '../../navigation/types';
 import { colors, shadow } from '../../theme';
@@ -15,12 +17,13 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Follows'>;
 
 export function FollowsScreen({ route, navigation }: Props) {
   const { userId, initialTab } = route.params;
+  const { session } = useAuth();
   const [tab, setTab] = useState<'followers' | 'following'>(initialTab ?? 'followers');
   const [followers, setFollowers] = useState<Profile[]>([]);
   const [following, setFollowing] = useState<Profile[]>([]);
 
   const fetchAll = useCallback(async () => {
-    const [followersRes, followingRes] = await Promise.all([
+    const [followersRes, followingRes, blocked] = await Promise.all([
       supabase
         .from('follows')
         .select('profiles!follows_follower_id_fkey(*)')
@@ -29,10 +32,15 @@ export function FollowsScreen({ route, navigation }: Props) {
         .from('follows')
         .select('profiles!follows_following_id_fkey(*)')
         .eq('follower_id', userId),
+      session?.user.id ? fetchBlockedIds(session.user.id) : Promise.resolve(new Set<string>()),
     ]);
-    setFollowers(((followersRes.data as any[]) ?? []).map((r) => r.profiles).filter(Boolean));
-    setFollowing(((followingRes.data as any[]) ?? []).map((r) => r.profiles).filter(Boolean));
-  }, [userId]);
+    const visible = (rows: any[]): Profile[] =>
+      rows
+        .map((r) => r.profiles as Profile | null)
+        .filter((p): p is Profile => Boolean(p) && !blocked.has(p.id));
+    setFollowers(visible((followersRes.data as any[]) ?? []));
+    setFollowing(visible((followingRes.data as any[]) ?? []));
+  }, [userId, session?.user.id]);
 
   useFocusEffect(
     useCallback(() => {

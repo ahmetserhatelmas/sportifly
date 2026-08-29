@@ -1,5 +1,7 @@
 import { Session } from '@supabase/supabase-js';
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { AppState, AppStateStatus } from 'react-native';
+import { registerPushToken } from '../lib/push';
 import { supabase } from '../lib/supabase';
 import { Profile } from '../types';
 
@@ -23,10 +25,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const userIdRef = useRef<string | null>(null);
 
   const fetchProfile = async (userId: string) => {
+    userIdRef.current = userId;
     const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
     setProfile((data as Profile) ?? null);
+    void registerPushToken(userId);
   };
 
   useEffect(() => {
@@ -43,11 +48,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (session) {
         fetchProfile(session.user.id);
       } else {
+        userIdRef.current = null;
         setProfile(null);
       }
     });
 
-    return () => subscription.unsubscribe();
+    const onAppState = (state: AppStateStatus) => {
+      if (state === 'active' && userIdRef.current) {
+        void registerPushToken(userIdRef.current);
+      }
+    };
+    const appSub = AppState.addEventListener('change', onAppState);
+
+    return () => {
+      subscription.unsubscribe();
+      appSub.remove();
+    };
   }, []);
 
   const refreshProfile = async () => {

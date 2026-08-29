@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { ChatView } from '../../components/ChatView';
 import { useAuth } from '../../context/AuthContext';
@@ -46,7 +45,7 @@ export function SupportScreen() {
   if (!session) return null;
 
   return (
-    <SafeAreaView style={styles.safe} edges={['bottom']}>
+    <View style={styles.safe}>
       <View style={styles.banner}>
         <Ionicons name="headset" size={22} color={colors.primaryDark} />
         <Text style={styles.bannerText}>
@@ -59,7 +58,7 @@ export function SupportScreen() {
         onSend={send}
         emptyText="Merhaba! Sana nasıl yardımcı olabiliriz?"
       />
-    </SafeAreaView>
+    </View>
   );
 }
 

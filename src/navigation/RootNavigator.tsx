@@ -19,6 +19,7 @@ import { SharePostScreen } from '../screens/home/SharePostScreen';
 import { DirectChatScreen } from '../screens/messages/DirectChatScreen';
 import { MessagesScreen } from '../screens/messages/MessagesScreen';
 import { EditProfileScreen } from '../screens/profile/EditProfileScreen';
+import { BlockedUsersScreen } from '../screens/profile/BlockedUsersScreen';
 import { FollowsScreen } from '../screens/profile/FollowsScreen';
 import { UserProfileScreen } from '../screens/profile/UserProfileScreen';
 import { LegalScreen } from '../screens/profile/LegalScreen';
@@ -146,7 +147,13 @@ export function RootNavigator() {
             name="CreateListing"
             component={CreateListingScreen}
             options={({ route }) => ({
-              title: route.params.type === 'field' ? 'Yeni Saha İlanı' : 'Yeni Ders İlanı',
+              title: route.params.listingId
+                ? route.params.type === 'field'
+                  ? 'Saha İlanını Düzenle'
+                  : 'Ders İlanını Düzenle'
+                : route.params.type === 'field'
+                  ? 'Yeni Saha İlanı'
+                  : 'Yeni Ders İlanı',
               presentation: 'modal',
             })}
           />
@@ -195,6 +202,11 @@ export function RootNavigator() {
             name="Follows"
             component={FollowsScreen}
             options={{ title: 'Takip' }}
+          />
+          <RootStack.Screen
+            name="BlockedUsers"
+            component={BlockedUsersScreen}
+            options={{ title: 'Engel listesi' }}
           />
           <RootStack.Screen
             name="MyListings"

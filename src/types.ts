@@ -8,6 +8,8 @@ export type Profile = {
   is_field_owner?: boolean;
   is_instructor?: boolean;
   is_admin?: boolean;
+  expo_push_token?: string | null;
+  push_enabled?: boolean;
   created_at: string;
 };
 
@@ -62,6 +64,8 @@ export type Listing = {
   image_url: string | null;
   open_hour?: number;
   close_hour?: number;
+  open_days?: number[];
+  duration_minutes?: number;
   created_at: string;
   profiles?: Profile;
   avg_rating?: number;
@@ -117,13 +121,20 @@ export type SharedPost = {
   caption: string | null;
 };
 
+export type SharedListing = {
+  id: string;
+  title: string;
+};
+
 export type ChatMessage = {
   id: string;
   user_id: string;
   content: string;
   created_at: string;
   post_id?: string | null;
+  listing_id?: string | null;
   shared_post?: SharedPost | null;
+  shared_listing?: SharedListing | null;
   profiles?: Profile;
 };
 

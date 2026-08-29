@@ -9,17 +9,23 @@ import {
   Modal,
   Pressable,
   StyleSheet,
+  Switch,
   Text,
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '../../components/Avatar';
+import { DuelCard } from '../../components/DuelCard';
+import { PhotoLightbox } from '../../components/PhotoLightbox';
 import { RoleBadges } from '../../components/RoleBadges';
 import { useAuth } from '../../context/AuthContext';
+import { fetchBlockedIds } from '../../lib/chatModeration';
+import { fetchUpcomingMatches } from '../../lib/matches';
+import { setPushEnabled } from '../../lib/push';
 import { supabase } from '../../lib/supabase';
 import { RootStackParamList } from '../../navigation/types';
 import { colors } from '../../theme';
-import { Post } from '../../types';
+import { Duel, Post } from '../../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -28,13 +34,17 @@ export function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const { session, profile, signOut, refreshProfile } = useAuth();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [photoOpen, setPhotoOpen] = useState(false);
   const [stats, setStats] = useState({ followers: 0, played: 0, won: 0 });
   const [posts, setPosts] = useState<Post[]>([]);
+  const [upcoming, setUpcoming] = useState<Duel[]>([]);
+  const [pushBusy, setPushBusy] = useState(false);
 
   const fetchData = useCallback(async () => {
     if (!session) return;
     const userId = session.user.id;
-    const [followers, played, won, myPosts] = await Promise.all([
+    const blocked = await fetchBlockedIds(userId);
+    const [followers, played, won, myPosts, matches] = await Promise.all([
       supabase.from('follows').select('*', { count: 'exact', head: true }).eq('following_id', userId),
       supabase
         .from('duel_participants')
@@ -46,6 +56,7 @@ export function ProfileScreen() {
         .select('*')
         .eq('user_id', userId)
         .order('created_at', { ascending: false }),
+      fetchUpcomingMatches(userId, blocked),
     ]);
     setStats({
       followers: followers.count ?? 0,
@@ -53,6 +64,7 @@ export function ProfileScreen() {
       won: won.count ?? 0,
     });
     setPosts((myPosts.data as Post[]) ?? []);
+    setUpcoming(matches);
   }, [session]);
 
   useFocusEffect(
@@ -73,6 +85,20 @@ export function ProfileScreen() {
     setDrawerOpen(false);
     setTimeout(fn, 250);
   };
+
+  const togglePush = async (enabled: boolean) => {
+    if (!session || pushBusy) return;
+    setPushBusy(true);
+    const error = await setPushEnabled(session.user.id, enabled);
+    setPushBusy(false);
+    if (error) {
+      Alert.alert('Bildirimler', 'Tercih kaydedilemedi. Veritabanı güncellemesini çalıştırdığından emin ol.');
+      return;
+    }
+    await refreshProfile();
+  };
+
+  const pushOn = profile?.push_enabled !== false;
 
   return (
     <View style={styles.container}>
@@ -102,7 +128,12 @@ export function ProfileScreen() {
 
             <View style={styles.avatarWrap}>
               <View style={styles.avatarBorder}>
-                <Avatar uri={profile?.avatar_url} name={profile?.username} size={92} />
+                <Avatar
+                  uri={profile?.avatar_url}
+                  name={profile?.username}
+                  size={92}
+                  onPress={profile?.avatar_url ? () => setPhotoOpen(true) : undefined}
+                />
               </View>
             </View>
 
@@ -140,6 +171,20 @@ export function ProfileScreen() {
                 <Text style={styles.statLabel}>Kazanılan</Text>
               </View>
             </View>
+
+            {upcoming.length > 0 ? (
+              <View>
+                <Text style={styles.sectionTitle}>Katıldığın maçlar</Text>
+                {upcoming.map((duel) => (
+                  <DuelCard
+                    key={duel.id}
+                    duel={duel}
+                    compact
+                    onPress={() => navigation.navigate('DuelDetail', { duelId: duel.id })}
+                  />
+                ))}
+              </View>
+            ) : null}
 
             <Text style={styles.galleryTitle}>Paylaşımlar</Text>
           </>
@@ -203,6 +248,23 @@ export function ProfileScreen() {
             )}
 
             <Text style={styles.drawerSection}>Ayarlar</Text>
+            <View style={styles.drawerItem}>
+              <Ionicons name="notifications-outline" size={22} color={colors.primary} />
+              <Text style={styles.drawerItemText}>Bildirimler</Text>
+              <View style={{ flex: 1 }} />
+              <Switch
+                value={pushOn}
+                onValueChange={togglePush}
+                disabled={pushBusy}
+                trackColor={{ false: colors.border, true: colors.primarySoft }}
+                thumbColor={pushOn ? colors.primary : colors.textMuted}
+              />
+            </View>
+            <DrawerItem
+              icon="ban-outline"
+              label="Engel listesi"
+              onPress={() => openScreen(() => navigation.navigate('BlockedUsers'))}
+            />
             <DrawerItem
               icon="create-outline"
               label="Profili Düzenle"
@@ -250,6 +312,12 @@ export function ProfileScreen() {
           </View>
         </View>
       </Modal>
+
+      <PhotoLightbox
+        uri={profile?.avatar_url}
+        visible={photoOpen}
+        onClose={() => setPhotoOpen(false)}
+      />
     </View>
   );
 }
@@ -316,6 +384,14 @@ const styles = StyleSheet.create({
   },
   statValue: { fontSize: 19, fontWeight: '800', color: colors.text },
   statLabel: { fontSize: 12, color: colors.textSecondary, marginTop: 4 },
+  sectionTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: colors.text,
+    paddingHorizontal: 16,
+    marginTop: 24,
+    marginBottom: 10,
+  },
   galleryTitle: {
     fontSize: 17,
     fontWeight: '800',

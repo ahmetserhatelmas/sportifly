@@ -15,10 +15,46 @@ const SPORT_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   Badminton: 'tennisball-outline',
 };
 
-export function DuelCard({ duel, onPress }: { duel: Duel; onPress: () => void }) {
+export function DuelCard({
+  duel,
+  onPress,
+  compact,
+}: {
+  duel: Duel;
+  onPress: () => void;
+  compact?: boolean;
+}) {
   const count = duel.participant_count ?? 0;
   const ratio = Math.min(count / duel.max_players, 1);
   const initials = (duel.profiles?.username ?? '?').slice(0, 2).toUpperCase();
+  const full = count >= duel.max_players;
+
+  if (compact) {
+    return (
+      <Pressable style={styles.compact} onPress={onPress}>
+        <View style={styles.sportIcon}>
+          <Ionicons
+            name={SPORT_ICONS[duel.sport] ?? 'trophy-outline'}
+            size={16}
+            color={colors.primary}
+          />
+        </View>
+        <View style={{ flex: 1, marginLeft: 10 }}>
+          <Text style={styles.compactTitle} numberOfLines={1}>
+            {duel.title}
+          </Text>
+          <Text style={styles.compactMeta} numberOfLines={1}>
+            {formatDuelDateTime(duel.match_date, duel.start_time)} · {count}/{duel.max_players}
+          </Text>
+        </View>
+        {full ? (
+          <View style={styles.fullBadge}>
+            <Text style={styles.fullBadgeText}>Dolu</Text>
+          </View>
+        ) : null}
+      </Pressable>
+    );
+  }
 
   return (
     <Pressable style={styles.card} onPress={onPress}>
@@ -34,6 +70,11 @@ export function DuelCard({ duel, onPress }: { duel: Duel; onPress: () => void })
           <Text style={styles.sportName}>{duel.sport}</Text>
         </View>
         <View style={styles.countRow}>
+          {full ? (
+            <View style={[styles.fullBadge, { marginRight: 8 }]}>
+              <Text style={styles.fullBadgeText}>Dolu</Text>
+            </View>
+          ) : null}
           <Ionicons name="people" size={15} color={colors.textSecondary} />
           <Text style={styles.countText}>
             {count} / {duel.max_players}
@@ -122,4 +163,22 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   progressFill: { height: 5, borderRadius: 3, backgroundColor: colors.primary },
+  compact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.background,
+    borderRadius: 14,
+    padding: 12,
+    marginHorizontal: 16,
+    marginBottom: 8,
+  },
+  compactTitle: { fontSize: 15, fontWeight: '800', color: colors.text },
+  compactMeta: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+  fullBadge: {
+    backgroundColor: colors.primarySoft,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  fullBadgeText: { fontSize: 11, fontWeight: '800', color: colors.primaryDark },
 });

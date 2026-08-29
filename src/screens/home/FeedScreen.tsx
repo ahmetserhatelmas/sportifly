@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '../../components/Avatar';
 import { EmptyState } from '../../components/EmptyState';
 import { useAuth } from '../../context/AuthContext';
+import { countVisibleUnread, fetchBlockedIds } from '../../lib/chatModeration';
 import { supabase } from '../../lib/supabase';
 import { RootStackParamList } from '../../navigation/types';
 import { colors, shadow } from '../../theme';
@@ -45,12 +46,7 @@ export function FeedScreen() {
       setUnreadCount(0);
       return;
     }
-    const { count, error } = await supabase
-      .from('direct_messages')
-      .select('id', { count: 'exact', head: true })
-      .eq('receiver_id', session.user.id)
-      .is('read_at', null);
-    if (!error) setUnreadCount(count ?? 0);
+    setUnreadCount(await countVisibleUnread(session.user.id));
   }, [session]);
 
   const fetchPosts = useCallback(async () => {
@@ -66,8 +62,13 @@ export function FeedScreen() {
       console.warn('Akış yüklenemedi:', error.message);
     }
     if (!error && data) {
+      const blocked = session?.user.id
+        ? await fetchBlockedIds(session.user.id)
+        : new Set<string>();
       setPosts(
-        data.map((p: any) => ({
+        data
+          .filter((p: any) => !blocked.has(p.user_id))
+          .map((p: any) => ({
           ...p,
           like_count: p.post_likes?.length ?? 0,
           comment_count: p.post_comments?.length ?? 0,

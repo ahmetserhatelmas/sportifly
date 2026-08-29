@@ -2,6 +2,7 @@
 # Release APK üretir → ~/Desktop/sportifly-release.apk
 set -euo pipefail
 export PATH="/opt/homebrew/opt/node@22/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+export JAVA_HOME="${JAVA_HOME:-/Applications/Android Studio.app/Contents/jbr/Contents/Home}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT/android"
 ./gradlew assembleRelease

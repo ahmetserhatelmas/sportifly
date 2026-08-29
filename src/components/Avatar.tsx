@@ -1,14 +1,15 @@
 import React from 'react';
-import { Image, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors } from '../theme';
 
 type Props = {
   uri?: string | null;
   name?: string | null;
   size?: number;
+  onPress?: () => void;
 };
 
-export function Avatar({ uri, name, size = 40 }: Props) {
+export function Avatar({ uri, name, size = 40, onPress }: Props) {
   const initials = (name ?? '?')
     .split(' ')
     .map((p) => p[0])
@@ -16,11 +17,9 @@ export function Avatar({ uri, name, size = 40 }: Props) {
     .slice(0, 2)
     .toUpperCase();
 
-  if (uri) {
-    return <Image source={{ uri }} style={{ width: size, height: size, borderRadius: size / 2 }} />;
-  }
-
-  return (
+  const body = uri ? (
+    <Image source={{ uri }} style={{ width: size, height: size, borderRadius: size / 2 }} />
+  ) : (
     <View
       style={[
         styles.fallback,
@@ -30,6 +29,16 @@ export function Avatar({ uri, name, size = 40 }: Props) {
       <Text style={[styles.initials, { fontSize: size * 0.38 }]}>{initials}</Text>
     </View>
   );
+
+  if (onPress) {
+    return (
+      <Pressable onPress={onPress} hitSlop={4}>
+        {body}
+      </Pressable>
+    );
+  }
+
+  return body;
 }
 
 const styles = StyleSheet.create({

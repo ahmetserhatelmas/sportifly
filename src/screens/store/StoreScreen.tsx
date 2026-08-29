@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { EmptyState } from '../../components/EmptyState';
 import { Stars } from '../../components/Stars';
 import { useAuth } from '../../context/AuthContext';
+import { fetchBlockedIds } from '../../lib/chatModeration';
 import { supabase } from '../../lib/supabase';
 import { RootStackParamList } from '../../navigation/types';
 import { colors, shadow } from '../../theme';
@@ -24,7 +25,7 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 export function StoreScreen() {
   const navigation = useNavigation<Nav>();
-  const { profile } = useAuth();
+  const { profile, session } = useAuth();
   const [tab, setTab] = useState<ListingType>('field');
   const [listings, setListings] = useState<Listing[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -42,8 +43,13 @@ export function StoreScreen() {
       .limit(50);
 
     if (!error && data) {
+      const blocked = session?.user.id
+        ? await fetchBlockedIds(session.user.id)
+        : new Set<string>();
       setListings(
-        data.map((l: any) => {
+        data
+          .filter((l: any) => !blocked.has(l.owner_id))
+          .map((l: any) => {
           const ratings = l.listing_reviews?.map((r: any) => r.rating) ?? [];
           return {
             ...l,
@@ -55,7 +61,7 @@ export function StoreScreen() {
         })
       );
     }
-  }, [tab]);
+  }, [tab, session?.user.id]);
 
   useFocusEffect(
     useCallback(() => {

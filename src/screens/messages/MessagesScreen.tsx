@@ -1,16 +1,28 @@
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import React, { useCallback, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import React, { useCallback, useRef, useState } from 'react';
+import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Swipeable } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '../../components/Avatar';
 import { EmptyState } from '../../components/EmptyState';
 import { useAuth } from '../../context/AuthContext';
+import {
+  blockUser,
+  fetchBlockedIds,
+  fetchHiddenMessageIds,
+  fetchHiddenPartners,
+  fetchMutedPartners,
+  hideConversation,
+  muteConversation,
+  reportUser,
+  unmuteConversation,
+} from '../../lib/chatModeration';
 import { supabase } from '../../lib/supabase';
 import { RootStackParamList } from '../../navigation/types';
 import { colors } from '../../theme';
 import { Profile } from '../../types';
-import { useFocusEffect } from '@react-navigation/native';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Messages'>;
 
@@ -19,9 +31,11 @@ type Row = {
   unread: number;
   lastMessage: string;
   lastAt: string;
+  muted: boolean;
 };
 
 type DmRow = {
+  id: string;
   sender_id: string;
   receiver_id: string;
   content: string;
@@ -32,19 +46,26 @@ type DmRow = {
 export function MessagesScreen({ navigation }: Props) {
   const { session } = useAuth();
   const [rows, setRows] = useState<Row[]>([]);
+  const openSwipeRef = useRef<Swipeable | null>(null);
 
   const fetchThreads = useCallback(async () => {
     if (!session) return;
     const me = session.user.id;
 
-    const { data: messages } = await supabase
-      .from('direct_messages')
-      .select('sender_id, receiver_id, content, created_at, read_at')
-      .or(`sender_id.eq.${me},receiver_id.eq.${me}`)
-      .order('created_at', { ascending: false })
-      .limit(500);
+    const [{ data: messages }, hiddenIds, hides, mutes, blocked] = await Promise.all([
+      supabase
+        .from('direct_messages')
+        .select('id, sender_id, receiver_id, content, created_at, read_at')
+        .or(`sender_id.eq.${me},receiver_id.eq.${me}`)
+        .order('created_at', { ascending: false })
+        .limit(500),
+      fetchHiddenMessageIds(me),
+      fetchHiddenPartners(me),
+      fetchMutedPartners(me),
+      fetchBlockedIds(me),
+    ]);
 
-    const msgs = (messages as DmRow[]) ?? [];
+    const msgs = ((messages as DmRow[]) ?? []).filter((m) => !hiddenIds.has(m.id));
     if (msgs.length === 0) {
       setRows([]);
       return;
@@ -54,17 +75,16 @@ export function MessagesScreen({ navigation }: Props) {
       ...new Set(msgs.map((m) => (m.sender_id === me ? m.receiver_id : m.sender_id))),
     ];
 
-    const { data: profiles } = await supabase
-      .from('profiles')
-      .select('*')
-      .in('id', partnerIds);
-
+    const { data: profiles } = await supabase.from('profiles').select('*').in('id', partnerIds);
     const profileMap = new Map(((profiles as Profile[]) ?? []).map((p) => [p.id, p]));
     const byPartner = new Map<string, Row>();
 
     for (const m of msgs) {
       const partnerId = m.sender_id === me ? m.receiver_id : m.sender_id;
+      if (blocked.has(partnerId)) continue;
       if (byPartner.has(partnerId)) continue;
+      const hiddenAt = hides.get(partnerId);
+      if (hiddenAt && m.created_at <= hiddenAt) continue;
       const profile = profileMap.get(partnerId);
       if (!profile) continue;
       byPartner.set(partnerId, {
@@ -72,6 +92,7 @@ export function MessagesScreen({ navigation }: Props) {
         unread: 0,
         lastMessage: m.content,
         lastAt: m.created_at,
+        muted: mutes.has(partnerId),
       });
     }
 
@@ -95,6 +116,86 @@ export function MessagesScreen({ navigation }: Props) {
     }, [fetchThreads])
   );
 
+  const openActions = (row: Row) => {
+    if (!session) return;
+    const partnerId = row.profile.id;
+    Alert.alert(row.profile.username, undefined, [
+      {
+        text: row.muted ? 'Sesi aç' : 'Sessize al',
+        onPress: async () => {
+          const { error } = row.muted
+            ? await unmuteConversation(session.user.id, partnerId)
+            : await muteConversation(session.user.id, partnerId);
+          if (error) {
+            Alert.alert('Sessize al', 'İşlem yapılamadı.');
+            return;
+          }
+          fetchThreads();
+        },
+      },
+      {
+        text: 'Engelle',
+        style: 'destructive',
+        onPress: () =>
+          Alert.alert(
+            'Engelle',
+            `${row.profile.username} engellensin mi? Sana mesaj atamaz.`,
+            [
+              { text: 'Vazgeç', style: 'cancel' },
+              {
+                text: 'Engelle',
+                style: 'destructive',
+                onPress: async () => {
+                  const { error } = await blockUser(session.user.id, partnerId);
+                  if (error) {
+                    Alert.alert('Engelleme', 'İşlem yapılamadı.');
+                    return;
+                  }
+                  fetchThreads();
+                },
+              },
+            ]
+          ),
+      },
+      {
+        text: 'Raporla',
+        onPress: async () => {
+          const { error } = await reportUser(session.user.id, partnerId);
+          if (error) {
+            Alert.alert('Rapor', 'Rapor gönderilemedi.');
+            return;
+          }
+          Alert.alert('Teşekkürler', 'Raporun iletildi.');
+        },
+      },
+      {
+        text: 'Sohbeti sil',
+        style: 'destructive',
+        onPress: () =>
+          Alert.alert(
+            'Sohbeti sil',
+            'Sohbet yalnızca senden silinir. Karşı tarafta durmaya devam eder.',
+            [
+              { text: 'Vazgeç', style: 'cancel' },
+              {
+                text: 'Sil',
+                style: 'destructive',
+                onPress: async () => {
+                  const { error } = await hideConversation(session.user.id, partnerId);
+                  if (error) {
+                    Alert.alert('Sohbet', 'Sohbet silinemedi.');
+                    return;
+                  }
+                  fetchThreads();
+                },
+              },
+            ]
+          ),
+      },
+      { text: 'Vazgeç', style: 'cancel' },
+    ]);
+  };
+
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       <FlatList
@@ -109,47 +210,105 @@ export function MessagesScreen({ navigation }: Props) {
           />
         }
         renderItem={({ item }) => (
-          <Pressable
-            style={styles.row}
-            onPress={() =>
+          <ConversationRow
+            item={item}
+            onOpen={() =>
               navigation.navigate('DirectChat', {
                 userId: item.profile.id,
                 username: item.profile.username,
               })
             }
-          >
-            <Avatar
-              uri={item.profile.avatar_url}
-              name={item.profile.username}
-              size={46}
-            />
-            <View style={{ flex: 1, marginLeft: 12 }}>
-              <Text style={[styles.name, item.unread > 0 && styles.nameUnread]}>
-                {item.profile.username}
-              </Text>
-              <Text
-                style={[styles.preview, item.unread > 0 && styles.previewUnread]}
-                numberOfLines={1}
-              >
-                {item.lastMessage}
-              </Text>
-            </View>
-            {item.unread > 0 ? (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>{item.unread > 99 ? '99+' : item.unread}</Text>
-              </View>
-            ) : (
-              <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-            )}
-          </Pressable>
+            onMenu={() => openActions(item)}
+            onSwipeOpen={(ref) => {
+              if (openSwipeRef.current && openSwipeRef.current !== ref) {
+                openSwipeRef.current.close();
+              }
+              openSwipeRef.current = ref;
+            }}
+          />
         )}
       />
     </SafeAreaView>
   );
 }
 
+function ConversationRow({
+  item,
+  onOpen,
+  onMenu,
+  onSwipeOpen,
+}: {
+  item: Row;
+  onOpen: () => void;
+  onMenu: () => void;
+  onSwipeOpen: (ref: Swipeable) => void;
+}) {
+  const swipeRef = useRef<Swipeable>(null);
+
+  return (
+    <Swipeable
+      ref={swipeRef}
+      overshootRight={false}
+      rightThreshold={28}
+      onSwipeableWillOpen={() => {
+        if (swipeRef.current) onSwipeOpen(swipeRef.current);
+      }}
+      renderRightActions={() => (
+        <Pressable
+          style={styles.swipeMenu}
+          onPress={() => {
+            swipeRef.current?.close();
+            onMenu();
+          }}
+        >
+          <Ionicons name="menu" size={22} color="#fff" />
+        </Pressable>
+      )}
+    >
+      <Pressable style={styles.row} onPress={onOpen}>
+        <Avatar uri={item.profile.avatar_url} name={item.profile.username} size={46} />
+        <View style={{ flex: 1, marginLeft: 12 }}>
+          <Text style={[styles.name, item.unread > 0 && styles.nameUnread]}>
+            {item.profile.username}
+          </Text>
+          <Text
+            style={[styles.preview, item.unread > 0 && styles.previewUnread]}
+            numberOfLines={1}
+          >
+            {item.lastMessage}
+          </Text>
+        </View>
+        {item.muted ? (
+          <Ionicons
+            name="notifications-off-outline"
+            size={18}
+            color={colors.textMuted}
+            style={{ marginRight: 8 }}
+          />
+        ) : null}
+        {item.unread > 0 ? (
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>{item.unread > 99 ? '99+' : item.unread}</Text>
+          </View>
+        ) : (
+          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+        )}
+      </Pressable>
+    </Swipeable>
+  );
+}
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
+  swipeMenu: {
+    width: 56,
+    marginBottom: 10,
+    marginLeft: 8,
+    borderRadius: 14,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

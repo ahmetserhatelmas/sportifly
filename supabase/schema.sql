@@ -16,6 +16,8 @@ create table if not exists public.profiles (
   is_field_owner boolean not null default false,
   is_instructor boolean not null default false,
   is_admin boolean not null default false,
+  expo_push_token text,
+  push_enabled boolean not null default true,
   created_at timestamptz not null default now()
 );
 
@@ -23,6 +25,7 @@ create table if not exists public.profiles (
 alter table public.profiles add column if not exists is_field_owner boolean not null default false;
 alter table public.profiles add column if not exists is_instructor boolean not null default false;
 alter table public.profiles add column if not exists is_admin boolean not null default false;
+alter table public.profiles add column if not exists push_enabled boolean not null default true;
 
 alter table public.profiles enable row level security;
 
@@ -180,6 +183,8 @@ create table if not exists public.listings (
   image_url text,
   open_hour int not null default 8 check (open_hour between 0 and 23),
   close_hour int not null default 22 check (close_hour between 1 and 24),
+  open_days int[] not null default '{1,2,3,4,5,6,7}',
+  duration_minutes int not null default 60 check (duration_minutes between 15 and 240),
   created_at timestamptz not null default now()
 );
 
@@ -268,7 +273,7 @@ create policy "Kullanıcı talep oluşturabilir"
 
 create unique index if not exists purchases_slot_unique
   on public.purchases (listing_id, slot_date, slot_time)
-  where status in ('pending', 'accepted')
+  where status = 'accepted'
     and slot_date is not null
     and slot_time is not null;
 
@@ -309,11 +314,50 @@ as $$
   from public.purchases p
   where p.listing_id = p_listing_id
     and p.slot_date = p_date
-    and p.status in ('pending', 'accepted')
+    and p.status = 'accepted'
     and p.slot_time is not null;
 $$;
 
 grant execute on function public.listing_booked_slots(uuid, date) to authenticated, anon;
+
+create or replace function public.enforce_booking_window()
+returns trigger
+language plpgsql
+as $$
+declare
+  v_days int[];
+  v_today date := (timezone('Europe/Istanbul', now()))::date;
+  v_dow int;
+begin
+  if new.slot_date is null then
+    raise exception 'Tarih gerekli';
+  end if;
+
+  if new.slot_date < v_today then
+    raise exception 'Geçmiş güne randevu alınamaz';
+  end if;
+
+  if new.slot_date > v_today + 6 then
+    raise exception 'En fazla 1 hafta sonrası için randevu alınabilir';
+  end if;
+
+  select open_days into v_days from public.listings where id = new.listing_id;
+  v_dow := extract(isodow from new.slot_date)::int;
+
+  if v_days is not null and not (v_dow = any (v_days)) then
+    raise exception 'Bu günde ilan müsait değil';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists purchases_enforce_booking_window on public.purchases;
+create trigger purchases_enforce_booking_window
+  before insert or update of slot_date, listing_id
+  on public.purchases
+  for each row
+  execute function public.enforce_booking_window();
 
 create table if not exists public.notifications (
   id uuid primary key default gen_random_uuid(),
@@ -340,6 +384,81 @@ create policy "Kullanıcı bildirimini okundu işaretler"
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
 
+create extension if not exists pg_net with schema extensions;
+
+create or replace function public.try_send_expo_push(p_token text, p_title text, p_body text)
+returns void
+language plpgsql
+security definer
+set search_path = public, extensions, net
+as $$
+begin
+  if p_token is null or length(trim(p_token)) = 0 then
+    return;
+  end if;
+
+  perform net.http_post(
+    url := 'https://exp.host/--/api/v2/push/send',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'Accept', 'application/json'
+    ),
+    body := jsonb_build_object(
+      'to', p_token,
+      'title', p_title,
+      'body', p_body,
+      'sound', 'default',
+      'channelId', 'reservations',
+      'priority', 'high'
+    )
+  );
+exception
+  when others then
+    return;
+end;
+$$;
+
+create or replace function public.notify_dm()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_token text;
+  v_enabled boolean;
+  v_name text;
+begin
+  if exists (
+    select 1 from public.chat_mutes m
+    where m.user_id = new.receiver_id and m.partner_id = new.sender_id
+  ) then
+    return new;
+  end if;
+
+  select p.expo_push_token, coalesce(p.push_enabled, true)
+    into v_token, v_enabled
+  from public.profiles p
+  where p.id = new.receiver_id;
+
+  if not coalesce(v_enabled, true) or v_token is null or length(v_token) < 8 then
+    return new;
+  end if;
+
+  select coalesce(nullif(trim(p.full_name), ''), p.username)
+    into v_name
+  from public.profiles p
+  where p.id = new.sender_id;
+
+  perform public.try_send_expo_push(
+    v_token,
+    coalesce(v_name, 'Yeni mesaj'),
+    left(coalesce(new.content, ''), 120)
+  );
+  return new;
+end;
+$$;
+
 create or replace function public.notify_booking()
 returns trigger
 language plpgsql
@@ -352,6 +471,9 @@ declare
   v_type text;
   v_name text;
   v_when text;
+  v_push_title text;
+  v_push_body text;
+  v_token text;
 begin
   select owner_id, title, type into v_owner, v_title, v_type
   from public.listings
@@ -373,47 +495,52 @@ begin
   end;
 
   if TG_OP = 'INSERT' then
-    insert into public.notifications (user_id, type, title, body, listing_id, purchase_id, from_user_id)
-    values (
-      v_owner,
-      'booking_request',
-      case when v_type = 'field' then 'Yeni kiralama talebi' else 'Yeni ders talebi' end,
-      v_name || ' · ' || v_title || ' · ' || v_when,
-      new.listing_id,
-      new.id,
-      new.user_id
-    );
+    v_push_title := case when v_type = 'field' then 'Yeni kiralama talebi' else 'Yeni ders talebi' end;
+    v_push_body := v_name || ' · ' || v_title || ' · ' || v_when;
 
-    insert into public.direct_messages (sender_id, receiver_id, content)
+    insert into public.notifications (user_id, type, title, body, listing_id, purchase_id, from_user_id)
+    values (v_owner, 'booking_request', v_push_title, v_push_body, new.listing_id, new.id, new.user_id);
+
+    insert into public.direct_messages (sender_id, receiver_id, content, listing_id)
     values (
       new.user_id,
       v_owner,
       case
-        when v_type = 'field' then '📅 Saha kiralama talebi: ' || v_title || E'\n' || v_when
-        else '📅 Ders talebi: ' || v_title || E'\n' || v_when
+        when v_type = 'field' then 'Saha kiralama talebi'
+        else 'Ders talebi'
       end
+      || E'\nAd soyad: ' || v_name || E'\n' || v_title || E'\n' || v_when,
+      new.listing_id
     );
+
+    select expo_push_token into v_token from public.profiles where id = v_owner;
+    perform public.try_send_expo_push(v_token, v_push_title, v_push_body);
+
   elsif TG_OP = 'UPDATE' and old.status is distinct from new.status and new.status in ('accepted', 'rejected') then
+    v_push_title := case when new.status = 'accepted' then 'Talebin onaylandı' else 'Talebin reddedildi' end;
+    v_push_body := v_title || ' · ' || v_when;
+
     insert into public.notifications (user_id, type, title, body, listing_id, purchase_id, from_user_id)
     values (
       new.user_id,
       case when new.status = 'accepted' then 'booking_accepted' else 'booking_rejected' end,
-      case when new.status = 'accepted' then 'Talebin onaylandı' else 'Talebin reddedildi' end,
-      v_title || ' · ' || v_when,
+      v_push_title,
+      v_push_body,
       new.listing_id,
       new.id,
       v_owner
     );
 
-    insert into public.direct_messages (sender_id, receiver_id, content)
+    insert into public.direct_messages (sender_id, receiver_id, content, listing_id)
     values (
       v_owner,
       new.user_id,
-      case
-        when new.status = 'accepted' then '✅ Talebin onaylandı: ' || v_title || E'\n' || v_when
-        else '❌ Talebin reddedildi: ' || v_title || E'\n' || v_when
-      end
+      v_push_title || E'\n' || v_title || E'\n' || v_when,
+      new.listing_id
     );
+
+    select expo_push_token into v_token from public.profiles where id = new.user_id;
+    perform public.try_send_expo_push(v_token, v_push_title, v_push_body);
   end if;
 
   return new;
@@ -533,6 +660,7 @@ create table if not exists public.direct_messages (
   receiver_id uuid not null references public.profiles (id) on delete cascade,
   content text not null,
   post_id uuid references public.posts (id) on delete set null,
+  listing_id uuid references public.listings (id) on delete set null,
   read_at timestamptz,
   created_at timestamptz not null default now()
 );
@@ -543,11 +671,210 @@ create policy "Kullanıcı kendi mesajlaşmalarını görebilir"
   on public.direct_messages for select
   using (auth.uid() = sender_id or auth.uid() = receiver_id);
 
+create table if not exists public.chat_hides (
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  partner_id uuid not null references public.profiles (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (user_id, partner_id)
+);
+alter table public.chat_hides enable row level security;
+drop policy if exists "Kullanıcı gizlediği sohbetleri görür" on public.chat_hides;
+create policy "Kullanıcı gizlediği sohbetleri görür"
+  on public.chat_hides for select using (auth.uid() = user_id);
+drop policy if exists "Kullanıcı sohbet gizleyebilir" on public.chat_hides;
+create policy "Kullanıcı sohbet gizleyebilir"
+  on public.chat_hides for insert with check (auth.uid() = user_id);
+drop policy if exists "Kullanıcı sohbet gizini kaldırabilir" on public.chat_hides;
+create policy "Kullanıcı sohbet gizini kaldırabilir"
+  on public.chat_hides for delete using (auth.uid() = user_id);
+
+create table if not exists public.chat_mutes (
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  partner_id uuid not null references public.profiles (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (user_id, partner_id),
+  check (user_id <> partner_id)
+);
+alter table public.chat_mutes enable row level security;
+drop policy if exists "Kullanıcı sessiz sohbetlerini görür" on public.chat_mutes;
+create policy "Kullanıcı sessiz sohbetlerini görür"
+  on public.chat_mutes for select using (auth.uid() = user_id);
+drop policy if exists "Kullanıcı sohbet sessize alabilir" on public.chat_mutes;
+create policy "Kullanıcı sohbet sessize alabilir"
+  on public.chat_mutes for insert with check (auth.uid() = user_id);
+drop policy if exists "Kullanıcı sohbet sesini açabilir" on public.chat_mutes;
+create policy "Kullanıcı sohbet sesini açabilir"
+  on public.chat_mutes for delete using (auth.uid() = user_id);
+
+create table if not exists public.blocks (
+  blocker_id uuid not null references public.profiles (id) on delete cascade,
+  blocked_id uuid not null references public.profiles (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (blocker_id, blocked_id),
+  check (blocker_id <> blocked_id)
+);
+alter table public.blocks enable row level security;
+drop policy if exists "Kullanıcı engellerini görür" on public.blocks;
+create policy "Kullanıcı engellerini görür"
+  on public.blocks for select using (auth.uid() = blocker_id or auth.uid() = blocked_id);
+drop policy if exists "Kullanıcı engelleyebilir" on public.blocks;
+create policy "Kullanıcı engelleyebilir"
+  on public.blocks for insert with check (auth.uid() = blocker_id);
+drop policy if exists "Kullanıcı engeli kaldırabilir" on public.blocks;
+create policy "Kullanıcı engeli kaldırabilir"
+  on public.blocks for delete using (auth.uid() = blocker_id);
+
+create or replace function public.blocked_with(a uuid, b uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select a is not null and b is not null and exists (
+    select 1 from public.blocks
+    where (blocker_id = a and blocked_id = b)
+       or (blocker_id = b and blocked_id = a)
+  );
+$$;
+
+create or replace function public.on_block_insert()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  delete from public.follows
+  where (follower_id = new.blocker_id and following_id = new.blocked_id)
+     or (follower_id = new.blocked_id and following_id = new.blocker_id);
+
+  insert into public.chat_hides (user_id, partner_id)
+  values (new.blocker_id, new.blocked_id), (new.blocked_id, new.blocker_id)
+  on conflict do nothing;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists blocks_apply_effects on public.blocks;
+create trigger blocks_apply_effects
+  after insert on public.blocks
+  for each row
+  execute function public.on_block_insert();
+
+drop policy if exists "Profiller herkes tarafından okunabilir" on public.profiles;
+create policy "Profiller herkes tarafından okunabilir"
+  on public.profiles for select
+  using (
+    auth.uid() is null
+    or auth.uid() = id
+    or not exists (
+      select 1 from public.blocks
+      where blocker_id = profiles.id and blocked_id = auth.uid()
+    )
+  );
+
+drop policy if exists "Kullanıcı takip edebilir" on public.follows;
+create policy "Kullanıcı takip edebilir"
+  on public.follows for insert
+  with check (
+    auth.uid() = follower_id
+    and not public.blocked_with(auth.uid(), following_id)
+  );
+
+drop policy if exists "Gönderiler herkes tarafından okunabilir" on public.posts;
+create policy "Gönderiler herkes tarafından okunabilir"
+  on public.posts for select
+  using (auth.uid() is null or not public.blocked_with(auth.uid(), user_id));
+
+drop policy if exists "Yorumlar herkes tarafından okunabilir" on public.post_comments;
+create policy "Yorumlar herkes tarafından okunabilir"
+  on public.post_comments for select
+  using (auth.uid() is null or not public.blocked_with(auth.uid(), user_id));
+
+drop policy if exists "İlanlar herkes tarafından okunabilir" on public.listings;
+create policy "İlanlar herkes tarafından okunabilir"
+  on public.listings for select
+  using (auth.uid() is null or not public.blocked_with(auth.uid(), owner_id));
+
+drop policy if exists "Değerlendirmeler herkes tarafından okunabilir" on public.listing_reviews;
+create policy "Değerlendirmeler herkes tarafından okunabilir"
+  on public.listing_reviews for select
+  using (auth.uid() is null or not public.blocked_with(auth.uid(), user_id));
+
+drop policy if exists "Düellolar herkes tarafından okunabilir" on public.duels;
+create policy "Düellolar herkes tarafından okunabilir"
+  on public.duels for select
+  using (auth.uid() is null or not public.blocked_with(auth.uid(), creator_id));
+
+drop policy if exists "Kullanıcı düelloya katılabilir" on public.duel_participants;
+create policy "Kullanıcı düelloya katılabilir"
+  on public.duel_participants for insert
+  with check (
+    auth.uid() = user_id
+    and not exists (
+      select 1 from public.duels d
+      where d.id = duel_id and public.blocked_with(auth.uid(), d.creator_id)
+    )
+  );
+
+drop policy if exists "Katılımcılar düello mesajlarını okuyabilir" on public.duel_messages;
+create policy "Katılımcılar düello mesajlarını okuyabilir"
+  on public.duel_messages for select
+  using (
+    exists (
+      select 1 from public.duel_participants dp
+      where dp.duel_id = duel_messages.duel_id and dp.user_id = auth.uid()
+    )
+    and not exists (
+      select 1 from public.duels d
+      where d.id = duel_messages.duel_id and public.blocked_with(auth.uid(), d.creator_id)
+    )
+    and (
+      user_id = auth.uid()
+      or not public.blocked_with(auth.uid(), user_id)
+    )
+  );
+
+drop policy if exists "Kullanıcı kendi mesajlaşmalarını görebilir" on public.direct_messages;
+create policy "Kullanıcı kendi mesajlaşmalarını görebilir"
+  on public.direct_messages for select
+  using (
+    (auth.uid() = sender_id or auth.uid() = receiver_id)
+    and not public.blocked_with(
+      auth.uid(),
+      case when auth.uid() = sender_id then receiver_id else sender_id end
+    )
+  );
+
+create table if not exists public.reports (
+  id uuid primary key default gen_random_uuid(),
+  reporter_id uuid not null references public.profiles (id) on delete cascade,
+  reported_id uuid not null references public.profiles (id) on delete cascade,
+  reason text,
+  created_at timestamptz not null default now(),
+  check (reporter_id <> reported_id)
+);
+alter table public.reports enable row level security;
+drop policy if exists "Kullanıcı kendi raporlarını görür" on public.reports;
+create policy "Kullanıcı kendi raporlarını görür"
+  on public.reports for select using (auth.uid() = reporter_id);
+drop policy if exists "Kullanıcı rapor gönderebilir" on public.reports;
+create policy "Kullanıcı rapor gönderebilir"
+  on public.reports for insert with check (auth.uid() = reporter_id);
+
 drop policy if exists "Kullanıcı takip ettiği kişiye mesaj gönderebilir" on public.direct_messages;
+drop policy if exists "Kullanıcı sohbet ortağına mesaj gönderebilir" on public.direct_messages;
 create policy "Kullanıcı sohbet ortağına mesaj gönderebilir"
   on public.direct_messages for insert
   with check (
     auth.uid() = sender_id
+    and not exists (
+      select 1 from public.blocks b
+      where (b.blocker_id = auth.uid() and b.blocked_id = receiver_id)
+         or (b.blocker_id = receiver_id and b.blocked_id = auth.uid())
+    )
     and (
       exists (
         select 1 from public.follows f
@@ -570,11 +897,67 @@ create policy "Alıcı mesajı okundu işaretleyebilir"
   using (auth.uid() = receiver_id)
   with check (auth.uid() = receiver_id);
 
+drop policy if exists "Gönderen kendi mesajını silebilir" on public.direct_messages;
+create policy "Gönderen kendi mesajını silebilir"
+  on public.direct_messages for delete
+  using (auth.uid() = sender_id);
+
+drop trigger if exists direct_messages_notify on public.direct_messages;
+create trigger direct_messages_notify
+  after insert on public.direct_messages
+  for each row
+  execute procedure public.notify_dm();
+
+create table if not exists public.message_hides (
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  message_id uuid not null references public.direct_messages (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (user_id, message_id)
+);
+alter table public.message_hides enable row level security;
+drop policy if exists "Kullanıcı gizlediği mesajları görür" on public.message_hides;
+create policy "Kullanıcı gizlediği mesajları görür"
+  on public.message_hides for select using (auth.uid() = user_id);
+drop policy if exists "Kullanıcı mesaj gizleyebilir" on public.message_hides;
+create policy "Kullanıcı mesaj gizleyebilir"
+  on public.message_hides for insert with check (auth.uid() = user_id);
+
+drop policy if exists "Gönderen düello mesajını silebilir" on public.duel_messages;
+create policy "Gönderen düello mesajını silebilir"
+  on public.duel_messages for delete
+  using (auth.uid() = user_id);
+
 drop trigger if exists purchases_notify_booking on public.purchases;
 create trigger purchases_notify_booking
   after insert or update of status on public.purchases
   for each row
   execute procedure public.notify_booking();
+
+create or replace function public.reject_overlapping_pending()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.status = 'accepted' and new.slot_date is not null and new.slot_time is not null then
+    update public.purchases
+    set status = 'rejected'
+    where listing_id = new.listing_id
+      and slot_date = new.slot_date
+      and slot_time = new.slot_time
+      and status = 'pending'
+      and id <> new.id;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists purchases_reject_overlap on public.purchases;
+create trigger purchases_reject_overlap
+  after update of status on public.purchases
+  for each row
+  execute procedure public.reject_overlapping_pending();
 
 -- ---------------------------------------------------------------------
 -- 7. DESTEK MESAJLARI
@@ -694,6 +1077,80 @@ $$;
 
 grant execute on function public.admin_review_role_request(uuid, text) to authenticated;
 grant execute on function public.is_current_user_admin() to authenticated;
+
+create or replace function public.push_after_booking(p_purchase_id uuid)
+returns json
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  rec record;
+begin
+  select
+    owner.expo_push_token as token,
+    case when l.type = 'field' then 'Yeni kiralama talebi' else 'Yeni ders talebi' end as title,
+    coalesce(nullif(trim(buyer.full_name), ''), buyer.username)
+      || ' · ' || l.title
+      || case
+        when pu.slot_date is not null then
+          ' · ' || to_char(pu.slot_date, 'DD.MM.YYYY') || ' • ' || to_char(pu.slot_time, 'HH24:MI')
+        else ''
+      end as body
+  into rec
+  from public.purchases pu
+  join public.listings l on l.id = pu.listing_id
+  join public.profiles owner on owner.id = l.owner_id
+  join public.profiles buyer on buyer.id = pu.user_id
+  where pu.id = p_purchase_id
+    and pu.user_id = auth.uid();
+
+  if rec.token is null or rec.token = '' then
+    return null;
+  end if;
+
+  return json_build_object('token', rec.token, 'title', rec.title, 'body', rec.body);
+end;
+$$;
+
+create or replace function public.push_after_decision(p_purchase_id uuid)
+returns json
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  rec record;
+begin
+  select
+    buyer.expo_push_token as token,
+    case when pu.status = 'accepted' then 'Talebin onaylandı' else 'Talebin reddedildi' end as title,
+    l.title
+      || case
+        when pu.slot_date is not null then
+          ' · ' || to_char(pu.slot_date, 'DD.MM.YYYY') || ' • ' || to_char(pu.slot_time, 'HH24:MI')
+        else ''
+      end as body
+  into rec
+  from public.purchases pu
+  join public.listings l on l.id = pu.listing_id
+  join public.profiles buyer on buyer.id = pu.user_id
+  where pu.id = p_purchase_id
+    and l.owner_id = auth.uid()
+    and pu.status in ('accepted', 'rejected');
+
+  if rec.token is null or rec.token = '' then
+    return null;
+  end if;
+
+  return json_build_object('token', rec.token, 'title', rec.title, 'body', rec.body);
+end;
+$$;
+
+grant execute on function public.push_after_booking(uuid) to authenticated;
+grant execute on function public.push_after_decision(uuid) to authenticated;
 
 -- ---------------------------------------------------------------------
 -- 8. STORAGE BUCKET'LARI (görseller)

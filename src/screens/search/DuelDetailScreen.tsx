@@ -5,7 +5,9 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '../../components/Avatar';
 import { Button } from '../../components/Button';
+import { EmptyState } from '../../components/EmptyState';
 import { useAuth } from '../../context/AuthContext';
+import { fetchBlockedIds } from '../../lib/chatModeration';
 import { duelStartsAt, isDuelPast } from '../../lib/duelTime';
 import { supabase } from '../../lib/supabase';
 import { RootStackParamList } from '../../navigation/types';
@@ -22,20 +24,25 @@ export function DuelDetailScreen({ route, navigation }: Props) {
   const { session } = useAuth();
   const [duel, setDuel] = useState<Duel | null>(null);
   const [participants, setParticipants] = useState<Participant[]>([]);
+  const [blockedIds, setBlockedIds] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   const fetchDuel = useCallback(async () => {
-    const [{ data: duelData }, { data: partData }] = await Promise.all([
+    const [{ data: duelData }, { data: partData }, blocked] = await Promise.all([
       supabase
         .from('duels')
         .select('*, profiles!duels_creator_id_fkey(*)')
         .eq('id', duelId)
         .single(),
       supabase.from('duel_participants').select('user_id, profiles(*)').eq('duel_id', duelId),
+      session?.user.id ? fetchBlockedIds(session.user.id) : Promise.resolve(new Set<string>()),
     ]);
-    setDuel(duelData as Duel);
+    setDuel((duelData as Duel) ?? null);
     setParticipants((partData as unknown as Participant[]) ?? []);
-  }, [duelId]);
+    setBlockedIds(blocked);
+    setLoaded(true);
+  }, [duelId, session?.user.id]);
 
   useFocusEffect(
     useCallback(() => {
@@ -43,11 +50,22 @@ export function DuelDetailScreen({ route, navigation }: Props) {
     }, [fetchDuel])
   );
 
-  if (!duel) {
+  if (!loaded) {
     return <SafeAreaView style={styles.safe} />;
   }
 
+  if (!duel) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <EmptyState icon="ban-outline" title="Bu düello kullanılamıyor" />
+      </SafeAreaView>
+    );
+  }
+
   const joined = participants.some((p) => p.user_id === session?.user.id);
+  const visibleParticipants = participants.filter(
+    (p) => !blockedIds.has(p.user_id) && p.profiles
+  );
   const isCreator = duel.creator_id === session?.user.id;
   const isFull = participants.length >= duel.max_players;
   const isExpired = isDuelPast(duel.match_date, duel.start_time);
@@ -116,7 +134,7 @@ export function DuelDetailScreen({ route, navigation }: Props) {
 
         <Text style={styles.sectionTitle}>Katılımcılar</Text>
         <View style={styles.card}>
-          {participants.map((p) => (
+          {visibleParticipants.map((p) => (
             <Pressable
               key={p.user_id}
               style={styles.participant}

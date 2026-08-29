@@ -23,24 +23,73 @@ import { pickAndUploadImage } from '../../lib/upload';
 import { supabase } from '../../lib/supabase';
 import { RootStackParamList } from '../../navigation/types';
 import { colors, radius } from '../../theme';
-import { HOUR_OPTIONS, hourLabel, parseHour } from '../../lib/booking';
-import { SPORTS } from '../../types';
+import { ALL_WEEKDAYS, HOUR_OPTIONS, WEEKDAYS, hourLabel, parseHour, parseOpenDays } from '../../lib/booking';
+import { Listing, SPORTS } from '../../types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CreateListing'>;
 
 export function CreateListingScreen({ route, navigation }: Props) {
-  const { type } = route.params;
+  const { type, listingId } = route.params;
+  const isEdit = !!listingId;
   const { session, profile, refreshProfile } = useAuth();
   const isField = type === 'field';
   const hasPermission =
+    isEdit ||
     !!profile?.is_admin ||
     (isField ? !!profile?.is_field_owner : !!profile?.is_instructor);
+
+  const [sport, setSport] = useState<string>(SPORTS[0]);
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [city, setCity] = useState<string | null>(null);
+  const [district, setDistrict] = useState<string | null>(null);
+  const [price, setPrice] = useState('');
+  const [openHour, setOpenHour] = useState('08');
+  const [closeHour, setCloseHour] = useState('22');
+  const [openDays, setOpenDays] = useState<number[]>([...ALL_WEEKDAYS]);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [commissionAccepted, setCommissionAccepted] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+
+  const districts = useMemo(() => (city ? getDistricts(city) : []), [city]);
 
   useEffect(() => {
     refreshProfile();
   }, [refreshProfile]);
 
   useEffect(() => {
+    if (!listingId || !session) return;
+    supabase
+      .from('listings')
+      .select('*')
+      .eq('id', listingId)
+      .eq('owner_id', session.user.id)
+      .single()
+      .then(({ data, error }) => {
+        if (error || !data) {
+          Alert.alert('Bulunamadı', 'Bu ilanı düzenleyemezsin.', [
+            { text: 'Tamam', onPress: () => navigation.goBack() },
+          ]);
+          return;
+        }
+        const listing = data as Listing;
+        setSport(listing.sport);
+        setTitle(listing.title);
+        setDescription(listing.description ?? '');
+        setCity(listing.city);
+        setDistrict(listing.district);
+        setPrice(String(listing.price));
+        setOpenHour(String(parseHour(listing.open_hour, 8)).padStart(2, '0'));
+        setCloseHour(String(parseHour(listing.close_hour, 22)).padStart(2, '0'));
+        setOpenDays(parseOpenDays(listing.open_days));
+        setImageUrl(listing.image_url);
+        setCommissionAccepted(true);
+      });
+  }, [listingId, session, navigation]);
+
+  useEffect(() => {
+    if (isEdit) return;
     if (profile && !hasPermission) {
       Alert.alert(
         'Yetki gerekli',
@@ -53,22 +102,7 @@ export function CreateListingScreen({ route, navigation }: Props) {
         ]
       );
     }
-  }, [profile, hasPermission, isField, navigation]);
-
-  const [sport, setSport] = useState<string>(SPORTS[0]);
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [city, setCity] = useState<string | null>(null);
-  const [district, setDistrict] = useState<string | null>(null);
-  const [price, setPrice] = useState('');
-  const [openHour, setOpenHour] = useState('08');
-  const [closeHour, setCloseHour] = useState('22');
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [commissionAccepted, setCommissionAccepted] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [uploading, setUploading] = useState(false);
-
-  const districts = useMemo(() => (city ? getDistricts(city) : []), [city]);
+  }, [isEdit, profile, hasPermission, isField, navigation]);
 
   const pickImage = async () => {
     setUploading(true);
@@ -98,7 +132,7 @@ export function CreateListingScreen({ route, navigation }: Props) {
     if (!price || Number.isNaN(priceNumber) || priceNumber <= 0) {
       return Alert.alert('Eksik bilgi', isField ? 'Saha kiralama ücretini girin.' : 'Ders ücretini girin.');
     }
-    if (!commissionAccepted) {
+    if (!isEdit && !commissionAccepted) {
       return Alert.alert('Onay gerekli', 'İlan verebilmek için komisyon bilgilendirmesini onaylamalısınız.');
     }
     const open = parseHour(openHour, 8);
@@ -106,29 +140,40 @@ export function CreateListingScreen({ route, navigation }: Props) {
     if (open >= close) {
       return Alert.alert('Saat aralığı', 'Kapanış saati açılıştan sonra olmalı.');
     }
+    if (openDays.length === 0) {
+      return Alert.alert('Açık günler', 'En az bir gün seçmelisin.');
+    }
 
-    setLoading(true);
-    const { error } = await supabase.from('listings').insert({
-      owner_id: session.user.id,
-      type,
+    const payload = {
       title: title.trim(),
       description: description.trim() || null,
       sport,
       city,
       district,
       price: priceNumber,
-      commission_accepted: true,
       image_url: imageUrl,
       open_hour: open,
       close_hour: close,
-    });
+      open_days: openDays,
+    };
+
+    setLoading(true);
+    const { error } = isEdit
+      ? await supabase.from('listings').update(payload).eq('id', listingId).eq('owner_id', session.user.id)
+      : await supabase.from('listings').insert({
+          ...payload,
+          owner_id: session.user.id,
+          type,
+          commission_accepted: true,
+          duration_minutes: 60,
+        });
     setLoading(false);
 
     if (error) {
       Alert.alert(
-        'Oluşturulamadı',
+        isEdit ? 'Kaydedilemedi' : 'Oluşturulamadı',
         error.message.includes('policy') || error.code === '42501'
-          ? 'Bu tür ilan için yetkin yok. Profil menüsünden başvuru gönderebilirsin.'
+          ? 'Bu işlem için yetkin yok.'
           : 'Bir hata oluştu, tekrar deneyin.'
       );
     } else {
@@ -199,7 +244,7 @@ export function CreateListingScreen({ route, navigation }: Props) {
           </View>
 
           <Input
-            label={isField ? 'Saha Kiralama Ücreti (₺/saat)' : 'Ders Ücreti (₺/ders)'}
+            label={isField ? 'Saha Kiralama Ücreti (₺/saat)' : 'Ders Ücreti (₺/saat)'}
             placeholder="Örn: 750"
             keyboardType="numeric"
             value={price}
@@ -229,20 +274,52 @@ export function CreateListingScreen({ route, navigation }: Props) {
             />
           </View>
 
-          <Pressable style={styles.checkboxRow} onPress={() => setCommissionAccepted((v) => !v)}>
-            <View style={[styles.checkbox, commissionAccepted && styles.checkboxChecked]}>
-              {commissionAccepted && <Ionicons name="checkmark" size={14} color="#fff" />}
-            </View>
-            <Text style={styles.checkboxText}>
-              İlan üzerinden yapılan satışlardan Sportifly'ın belirli bir oranda komisyon (pay)
-              alacağını okudum ve kabul ediyorum.
-            </Text>
-          </Pressable>
+          <Text style={[styles.sectionLabel, { marginTop: 16 }]}>
+            {isField ? 'Saha açık günleri' : 'Ders verilebilecek günler'}
+          </Text>
+          <Text style={styles.daysHint}>
+            Kullanıcılar yalnızca bu günlerde ve en fazla 1 hafta sonrası için talep atabilir.
+          </Text>
+          <View style={styles.daysRow}>
+            {WEEKDAYS.map((d) => {
+              const selected = openDays.includes(d.iso);
+              return (
+                <Chip
+                  key={d.iso}
+                  label={d.label}
+                  selected={selected}
+                  onPress={() =>
+                    setOpenDays((prev) =>
+                      prev.includes(d.iso) ? prev.filter((n) => n !== d.iso) : [...prev, d.iso].sort((a, b) => a - b)
+                    )
+                  }
+                />
+              );
+            })}
+          </View>
+
+          {!isEdit && (
+            <Pressable style={styles.checkboxRow} onPress={() => setCommissionAccepted((v) => !v)}>
+              <View style={[styles.checkbox, commissionAccepted && styles.checkboxChecked]}>
+                {commissionAccepted && <Ionicons name="checkmark" size={14} color="#fff" />}
+              </View>
+              <Text style={styles.checkboxText}>
+                İlan üzerinden yapılan satışlardan Sportifly'ın belirli bir oranda komisyon (pay)
+                alacağını okudum ve kabul ediyorum.
+              </Text>
+            </Pressable>
+          )}
         </ScrollView>
 
         <View style={styles.footer}>
           <Button
-            title={isField ? 'Saha İlanı Oluştur' : 'Ders İlanı Oluştur'}
+            title={
+              isEdit
+                ? 'Değişiklikleri Kaydet'
+                : isField
+                  ? 'Saha İlanı Oluştur'
+                  : 'Ders İlanı Oluştur'
+            }
             onPress={create}
             loading={loading}
           />
@@ -270,6 +347,8 @@ const styles = StyleSheet.create({
   },
   imagePlaceholderText: { marginTop: 8, color: colors.primaryDark, fontWeight: '600', fontSize: 13 },
   sectionLabel: { fontSize: 14, fontWeight: '600', color: colors.text, marginBottom: 10 },
+  daysHint: { fontSize: 12, color: colors.textSecondary, lineHeight: 17, marginBottom: 10, marginTop: -4 },
+  daysRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 8, rowGap: 8 },
   row: { flexDirection: 'row' },
   checkboxRow: {
     flexDirection: 'row',

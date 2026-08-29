@@ -24,13 +24,14 @@ export type RootStackParamList = {
   PostDetail: { postId: string };
   SharePost: { postId: string };
   Comments: { postId: string };
-  CreateListing: { type: ListingType };
+  CreateListing: { type: ListingType; listingId?: string };
   ListingDetail: { listingId: string };
   Messages: undefined;
   DirectChat: { userId: string; username: string };
   EditProfile: undefined;
   UserProfile: { userId: string };
   Follows: { userId: string; initialTab?: 'followers' | 'following' };
+  BlockedUsers: undefined;
   MyListings: undefined;
   Purchases: undefined;
   Support: undefined;

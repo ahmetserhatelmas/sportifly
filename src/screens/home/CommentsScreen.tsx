@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '../../components/Avatar';
 import { EmptyState } from '../../components/EmptyState';
 import { useAuth } from '../../context/AuthContext';
+import { fetchBlockedIds } from '../../lib/chatModeration';
 import { supabase } from '../../lib/supabase';
 import { RootStackParamList } from '../../navigation/types';
 import { colors } from '../../theme';
@@ -30,13 +31,16 @@ export function CommentsScreen({ route, navigation }: Props) {
   const [sending, setSending] = useState(false);
 
   const fetchComments = useCallback(async () => {
-    const { data } = await supabase
-      .from('post_comments')
-      .select('*, profiles(*)')
-      .eq('post_id', postId)
-      .order('created_at', { ascending: true });
-    setComments((data as PostComment[]) ?? []);
-  }, [postId]);
+    const [{ data }, blocked] = await Promise.all([
+      supabase
+        .from('post_comments')
+        .select('*, profiles(*)')
+        .eq('post_id', postId)
+        .order('created_at', { ascending: true }),
+      session?.user.id ? fetchBlockedIds(session.user.id) : Promise.resolve(new Set<string>()),
+    ]);
+    setComments(((data as PostComment[]) ?? []).filter((c) => !blocked.has(c.user_id)));
+  }, [postId, session?.user.id]);
 
   useEffect(() => {
     fetchComments();

@@ -16,6 +16,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '../../components/Avatar';
 import { Button } from '../../components/Button';
+import { EmptyState } from '../../components/EmptyState';
+import { fetchBlockedIds } from '../../lib/chatModeration';
 import { Input } from '../../components/Input';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
@@ -35,6 +37,7 @@ export function PostDetailScreen({ route, navigation }: Props) {
   const [editing, setEditing] = useState(false);
   const [editedCaption, setEditedCaption] = useState('');
   const [saving, setSaving] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   const fetchAll = useCallback(async () => {
     const [{ data: postData }, { data: commentData }] = await Promise.all([
@@ -49,15 +52,21 @@ export function PostDetailScreen({ route, navigation }: Props) {
         .eq('post_id', postId)
         .order('created_at', { ascending: true }),
     ]);
-    if (postData) {
+    const blocked = session?.user.id
+      ? await fetchBlockedIds(session.user.id)
+      : new Set<string>();
+    if (postData && !blocked.has((postData as any).user_id)) {
       const p = postData as any;
       setPost({
         ...p,
         like_count: p.post_likes?.length ?? 0,
         liked_by_me: p.post_likes?.some((l: any) => l.user_id === session?.user.id) ?? false,
       });
+    } else {
+      setPost(null);
     }
-    setComments((commentData as PostComment[]) ?? []);
+    setComments(((commentData as PostComment[]) ?? []).filter((c) => !blocked.has(c.user_id)));
+    setLoaded(true);
   }, [postId, session?.user.id]);
 
   useFocusEffect(
@@ -66,7 +75,14 @@ export function PostDetailScreen({ route, navigation }: Props) {
     }, [fetchAll])
   );
 
-  if (!post) return <SafeAreaView style={styles.safe} />;
+  if (!loaded) return <SafeAreaView style={styles.safe} />;
+  if (!post) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <EmptyState icon="ban-outline" title="Bu gönderi kullanılamıyor" />
+      </SafeAreaView>
+    );
+  }
 
   const isOwner = post.user_id === session?.user.id;
 

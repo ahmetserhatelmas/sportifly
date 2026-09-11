@@ -1,9 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { Image } from 'expo-image';
 import React, { useCallback, useState } from 'react';
 import {
   Alert,
-  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -18,6 +18,7 @@ import { Avatar } from '../../components/Avatar';
 import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
 import { fetchBlockedIds } from '../../lib/chatModeration';
+import { pushSocial } from '../../lib/push';
 import { Input } from '../../components/Input';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
@@ -30,7 +31,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'PostDetail'>;
 
 export function PostDetailScreen({ route, navigation }: Props) {
   const { postId } = route.params;
-  const { session } = useAuth();
+  const { session, profile } = useAuth();
   const [post, setPost] = useState<Post | null>(null);
   const [comments, setComments] = useState<PostComment[]>([]);
   const [commentText, setCommentText] = useState('');
@@ -101,6 +102,10 @@ export function PostDetailScreen({ route, navigation }: Props) {
       await supabase.from('post_likes').delete().match({ post_id: postId, user_id: session.user.id });
     } else {
       await supabase.from('post_likes').insert({ post_id: postId, user_id: session.user.id });
+      if (post.user_id !== session.user.id) {
+        const who = profile?.full_name || profile?.username || 'Birisi';
+        void pushSocial(post.user_id, 'Yeni beğeni', `${who} gönderini beğendi`);
+      }
     }
   };
 
@@ -112,6 +117,10 @@ export function PostDetailScreen({ route, navigation }: Props) {
       content: commentText.trim(),
     });
     if (!error) {
+      if (post.user_id !== session.user.id) {
+        const who = profile?.full_name || profile?.username || 'Birisi';
+        void pushSocial(post.user_id, 'Yeni yorum', `${who}: ${commentText.trim().slice(0, 80)}`);
+      }
       setCommentText('');
       fetchAll();
     }
@@ -189,7 +198,7 @@ export function PostDetailScreen({ route, navigation }: Props) {
             )}
           </Pressable>
 
-          <Image source={{ uri: post.image_url }} style={styles.image} />
+          <Image source={{ uri: post.image_url }} style={styles.image} contentFit="cover" />
 
           <View style={styles.actions}>
             <Pressable onPress={toggleLike} hitSlop={8} style={styles.actionBtn}>

@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import React, { useCallback, useRef, useState } from 'react';
-import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '../../components/Avatar';
@@ -46,6 +46,7 @@ type DmRow = {
 export function MessagesScreen({ navigation }: Props) {
   const { session } = useAuth();
   const [rows, setRows] = useState<Row[]>([]);
+  const [menuRow, setMenuRow] = useState<Row | null>(null);
   const openSwipeRef = useRef<Swipeable | null>(null);
 
   const fetchThreads = useCallback(async () => {
@@ -116,84 +117,70 @@ export function MessagesScreen({ navigation }: Props) {
     }, [fetchThreads])
   );
 
-  const openActions = (row: Row) => {
+  const closeMenu = () => setMenuRow(null);
+
+  const runMute = async (row: Row) => {
     if (!session) return;
-    const partnerId = row.profile.id;
-    Alert.alert(row.profile.username, undefined, [
+    const { error } = row.muted
+      ? await unmuteConversation(session.user.id, row.profile.id)
+      : await muteConversation(session.user.id, row.profile.id);
+    if (error) {
+      Alert.alert('Sessize al', 'İşlem yapılamadı.');
+      return;
+    }
+    fetchThreads();
+  };
+
+  const confirmBlock = (row: Row) => {
+    if (!session) return;
+    Alert.alert('Engelle', `${row.profile.username} engellensin mi? Sana mesaj atamaz.`, [
+      { text: 'Vazgeç', style: 'cancel' },
       {
-        text: row.muted ? 'Sesi aç' : 'Sessize al',
+        text: 'Engelle',
+        style: 'destructive',
         onPress: async () => {
-          const { error } = row.muted
-            ? await unmuteConversation(session.user.id, partnerId)
-            : await muteConversation(session.user.id, partnerId);
+          const { error } = await blockUser(session.user.id, row.profile.id);
           if (error) {
-            Alert.alert('Sessize al', 'İşlem yapılamadı.');
+            Alert.alert('Engelleme', 'İşlem yapılamadı.');
             return;
           }
           fetchThreads();
         },
       },
-      {
-        text: 'Engelle',
-        style: 'destructive',
-        onPress: () =>
-          Alert.alert(
-            'Engelle',
-            `${row.profile.username} engellensin mi? Sana mesaj atamaz.`,
-            [
-              { text: 'Vazgeç', style: 'cancel' },
-              {
-                text: 'Engelle',
-                style: 'destructive',
-                onPress: async () => {
-                  const { error } = await blockUser(session.user.id, partnerId);
-                  if (error) {
-                    Alert.alert('Engelleme', 'İşlem yapılamadı.');
-                    return;
-                  }
-                  fetchThreads();
-                },
-              },
-            ]
-          ),
-      },
-      {
-        text: 'Raporla',
-        onPress: async () => {
-          const { error } = await reportUser(session.user.id, partnerId);
-          if (error) {
-            Alert.alert('Rapor', 'Rapor gönderilemedi.');
-            return;
-          }
-          Alert.alert('Teşekkürler', 'Raporun iletildi.');
-        },
-      },
-      {
-        text: 'Sohbeti sil',
-        style: 'destructive',
-        onPress: () =>
-          Alert.alert(
-            'Sohbeti sil',
-            'Sohbet yalnızca senden silinir. Karşı tarafta durmaya devam eder.',
-            [
-              { text: 'Vazgeç', style: 'cancel' },
-              {
-                text: 'Sil',
-                style: 'destructive',
-                onPress: async () => {
-                  const { error } = await hideConversation(session.user.id, partnerId);
-                  if (error) {
-                    Alert.alert('Sohbet', 'Sohbet silinemedi.');
-                    return;
-                  }
-                  fetchThreads();
-                },
-              },
-            ]
-          ),
-      },
-      { text: 'Vazgeç', style: 'cancel' },
     ]);
+  };
+
+  const runReport = async (row: Row) => {
+    if (!session) return;
+    const { error } = await reportUser(session.user.id, row.profile.id);
+    if (error) {
+      Alert.alert('Rapor', 'Rapor gönderilemedi.');
+      return;
+    }
+    Alert.alert('Teşekkürler', 'Raporun iletildi.');
+  };
+
+  const confirmHide = (row: Row) => {
+    if (!session) return;
+    Alert.alert(
+      'Sohbeti sil',
+      'Sohbet yalnızca senden silinir. Karşı tarafta durmaya devam eder.',
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Sil',
+          style: 'destructive',
+          onPress: async () => {
+            const { error } = await hideConversation(session.user.id, row.profile.id);
+            if (error) {
+              Alert.alert('Sohbet', 'Sohbet silinemedi.');
+              return;
+            }
+            fetchThreads();
+          },
+        },
+      ]
+    );
   };
 
   return (
@@ -218,7 +205,7 @@ export function MessagesScreen({ navigation }: Props) {
                 username: item.profile.username,
               })
             }
-            onMenu={() => openActions(item)}
+            onMenu={() => setMenuRow(item)}
             onSwipeOpen={(ref) => {
               if (openSwipeRef.current && openSwipeRef.current !== ref) {
                 openSwipeRef.current.close();
@@ -228,7 +215,69 @@ export function MessagesScreen({ navigation }: Props) {
           />
         )}
       />
+
+      <Modal
+        visible={!!menuRow}
+        transparent
+        animationType="fade"
+        onRequestClose={closeMenu}
+      >
+        <View style={styles.sheetWrap}>
+          <Pressable style={styles.sheetBackdrop} onPress={closeMenu} />
+          {menuRow ? (
+            <View style={styles.sheet}>
+              <Text style={styles.sheetTitle}>{menuRow.profile.username}</Text>
+              <SheetBtn
+                label={menuRow.muted ? 'Sesi aç' : 'Sessize al'}
+                onPress={() => {
+                  closeMenu();
+                  runMute(menuRow);
+                }}
+              />
+              <SheetBtn
+                label="Engelle"
+                onPress={() => {
+                  closeMenu();
+                  confirmBlock(menuRow);
+                }}
+              />
+              <SheetBtn
+                label="Raporla"
+                onPress={() => {
+                  closeMenu();
+                  runReport(menuRow);
+                }}
+              />
+              <SheetBtn
+                label="Sohbeti sil"
+                danger
+                onPress={() => {
+                  closeMenu();
+                  confirmHide(menuRow);
+                }}
+              />
+              <SheetBtn label="Vazgeç" onPress={closeMenu} />
+            </View>
+          ) : null}
+        </View>
+      </Modal>
     </SafeAreaView>
+  );
+}
+
+function SheetBtn({
+  label,
+  onPress,
+  danger,
+}: {
+  label: string;
+  onPress: () => void;
+  danger?: boolean;
+}) {
+  return (
+    <Pressable style={styles.sheetBtn} onPress={onPress}>
+      <Text style={[styles.sheetBtnText, danger && { color: colors.danger }]}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -300,6 +349,33 @@ function ConversationRow({
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
+  sheetWrap: { flex: 1, justifyContent: 'center', paddingHorizontal: 28 },
+  sheetBackdrop: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+  },
+  sheet: {
+    backgroundColor: colors.card,
+    borderRadius: 20,
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    paddingBottom: 10,
+  },
+  sheetTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: colors.text,
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  sheetBtn: {
+    backgroundColor: colors.background,
+    borderRadius: 999,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  sheetBtnText: { fontSize: 15, fontWeight: '700', color: colors.text },
   swipeMenu: {
     width: 56,
     marginBottom: 10,

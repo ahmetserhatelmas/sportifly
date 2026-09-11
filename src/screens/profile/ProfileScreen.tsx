@@ -1,13 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { Image } from 'expo-image';
 import React, { useCallback, useState } from 'react';
 import {
   Alert,
   FlatList,
-  Image,
   Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Switch,
   Text,
@@ -21,7 +22,7 @@ import { RoleBadges } from '../../components/RoleBadges';
 import { useAuth } from '../../context/AuthContext';
 import { fetchBlockedIds } from '../../lib/chatModeration';
 import { fetchUpcomingMatches } from '../../lib/matches';
-import { setPushEnabled } from '../../lib/push';
+import { sendTestPush, setPushEnabled } from '../../lib/push';
 import { supabase } from '../../lib/supabase';
 import { RootStackParamList } from '../../navigation/types';
 import { colors } from '../../theme';
@@ -92,7 +93,7 @@ export function ProfileScreen() {
     const error = await setPushEnabled(session.user.id, enabled);
     setPushBusy(false);
     if (error) {
-      Alert.alert('Bildirimler', 'Tercih kaydedilemedi. Veritabanı güncellemesini çalıştırdığından emin ol.');
+      Alert.alert('Bildirimler', error);
       return;
     }
     await refreshProfile();
@@ -112,7 +113,11 @@ export function ProfileScreen() {
           <>
             <View style={styles.banner}>
               {profile?.banner_url ? (
-                <Image source={{ uri: profile.banner_url }} style={StyleSheet.absoluteFill} />
+                <Image
+                  source={{ uri: profile.banner_url }}
+                  style={StyleSheet.absoluteFill}
+                  contentFit="cover"
+                />
               ) : null}
               <SafeAreaView edges={['top']} style={styles.bannerContent}>
                 <Text style={styles.bannerTitle}>Profil</Text>
@@ -197,7 +202,12 @@ export function ProfileScreen() {
             style={styles.gridImage}
             onPress={() => navigation.navigate('PostDetail', { postId: item.id })}
           >
-            <Image source={{ uri: item.image_url }} style={styles.gridImageInner} />
+            <Image
+              source={{ uri: item.image_url }}
+              style={styles.gridImageInner}
+              contentFit="cover"
+              recyclingKey={item.id}
+            />
           </Pressable>
         )}
       />
@@ -217,7 +227,11 @@ export function ProfileScreen() {
             ]}
           >
             <Text style={styles.drawerTitle}>Menü</Text>
-
+            <ScrollView
+              style={{ flex: 1 }}
+              contentContainerStyle={{ flexGrow: 1, paddingBottom: 8 }}
+              showsVerticalScrollIndicator={false}
+            >
             <DrawerItem
               icon="pricetags-outline"
               label="İlanlarım"
@@ -260,6 +274,20 @@ export function ProfileScreen() {
                 thumbColor={pushOn ? colors.primary : colors.textMuted}
               />
             </View>
+            {pushOn ? (
+              <DrawerItem
+                icon="notifications-outline"
+                label="Test bildirimi gönder"
+                onPress={async () => {
+                  if (!session) return;
+                  const err = await sendTestPush(session.user.id);
+                  Alert.alert(
+                    'Bildirimler',
+                    err ?? 'Gönderildi. Bildirim gelmezse uygulamayı kapatıp tekrar dene.'
+                  );
+                }}
+              />
+            ) : null}
             <DrawerItem
               icon="ban-outline"
               label="Engel listesi"
@@ -309,6 +337,7 @@ export function ProfileScreen() {
                 openScreen(() => navigation.navigate('Legal', { title: 'Gizlilik Politikası' }))
               }
             />
+            </ScrollView>
           </View>
         </View>
       </Modal>

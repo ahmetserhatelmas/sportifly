@@ -7,6 +7,7 @@ import { Avatar } from '../../components/Avatar';
 import { EmptyState } from '../../components/EmptyState';
 import { useAuth } from '../../context/AuthContext';
 import { fetchBlockedIds } from '../../lib/chatModeration';
+import { pushSocial } from '../../lib/push';
 import { supabase } from '../../lib/supabase';
 import { RootStackParamList } from '../../navigation/types';
 import { colors } from '../../theme';
@@ -16,7 +17,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'SharePost'>;
 
 export function SharePostScreen({ route, navigation }: Props) {
   const { postId } = route.params;
-  const { session } = useAuth();
+  const { session, profile } = useAuth();
   const [friends, setFriends] = useState<Profile[]>([]);
   const [sendingId, setSendingId] = useState<string | null>(null);
 
@@ -53,12 +54,19 @@ export function SharePostScreen({ route, navigation }: Props) {
   const sendTo = async (friend: Profile) => {
     if (!session) return;
     setSendingId(friend.id);
-    const { error } = await supabase.from('direct_messages').insert({
-      sender_id: session.user.id,
-      receiver_id: friend.id,
-      content: 'Sana bir gönderi gönderdi',
-      post_id: postId,
-    });
+    const { data, error } = await supabase
+      .from('direct_messages')
+      .insert({
+        sender_id: session.user.id,
+        receiver_id: friend.id,
+        content: 'Sana bir gönderi gönderdi',
+        post_id: postId,
+      })
+      .select('id')
+      .single();
+    if (!error && data?.id) {
+      void pushSocial(friend.id, profile?.full_name || profile?.username || 'Yeni mesaj', 'Sana bir gönderi gönderdi');
+    }
     setSendingId(null);
     if (error) {
       Alert.alert(

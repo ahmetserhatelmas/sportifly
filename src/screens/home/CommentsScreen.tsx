@@ -16,6 +16,7 @@ import { Avatar } from '../../components/Avatar';
 import { EmptyState } from '../../components/EmptyState';
 import { useAuth } from '../../context/AuthContext';
 import { fetchBlockedIds } from '../../lib/chatModeration';
+import { pushSocial } from '../../lib/push';
 import { supabase } from '../../lib/supabase';
 import { RootStackParamList } from '../../navigation/types';
 import { colors } from '../../theme';
@@ -25,7 +26,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Comments'>;
 
 export function CommentsScreen({ route, navigation }: Props) {
   const { postId } = route.params;
-  const { session } = useAuth();
+  const { session, profile } = useAuth();
   const [comments, setComments] = useState<PostComment[]>([]);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -56,6 +57,16 @@ export function CommentsScreen({ route, navigation }: Props) {
     });
     setSending(false);
     if (!error) {
+      const { data: post } = await supabase
+        .from('posts')
+        .select('user_id')
+        .eq('id', postId)
+        .maybeSingle();
+      const ownerId = (post as { user_id?: string } | null)?.user_id;
+      if (ownerId && ownerId !== session.user.id) {
+        const who = profile?.full_name || profile?.username || 'Birisi';
+        void pushSocial(ownerId, 'Yeni yorum', `${who}: ${text.trim().slice(0, 80)}`);
+      }
       setText('');
       fetchComments();
     }

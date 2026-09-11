@@ -6,8 +6,11 @@ import { Image, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider } from './src/context/AuthContext';
+import { initNotificationHandler } from './src/lib/push';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { colors } from './src/theme';
+
+initNotificationHandler();
 
 export default function App() {
   const [fontsLoaded] = useFonts({

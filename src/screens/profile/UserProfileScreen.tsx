@@ -1,10 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { Image } from 'expo-image';
 import React, { useCallback, useLayoutEffect, useState } from 'react';
 import {
   Alert,
   FlatList,
-  Image,
   Pressable,
   StyleSheet,
   Text,
@@ -27,6 +27,7 @@ import {
   unmuteConversation,
 } from '../../lib/chatModeration';
 import { fetchUpcomingMatches } from '../../lib/matches';
+import { pushSocial } from '../../lib/push';
 import { supabase } from '../../lib/supabase';
 import { RootStackParamList } from '../../navigation/types';
 import { colors } from '../../theme';
@@ -37,7 +38,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'UserProfile'>;
 
 export function UserProfileScreen({ route, navigation }: Props) {
   const { userId } = route.params;
-  const { session } = useAuth();
+  const { session, profile: me } = useAuth();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [stats, setStats] = useState({ followers: 0, played: 0, won: 0 });
   const [posts, setPosts] = useState<Post[]>([]);
@@ -234,6 +235,8 @@ export function UserProfileScreen({ route, navigation }: Props) {
       await supabase
         .from('follows')
         .insert({ follower_id: session.user.id, following_id: userId });
+      const who = me?.full_name || me?.username || 'Birisi';
+      void pushSocial(userId, 'Yeni takipçi', `${who} seni takip etmeye başladı`);
     }
     setBusy(false);
     fetchData();
@@ -260,7 +263,11 @@ export function UserProfileScreen({ route, navigation }: Props) {
           <>
             <View style={styles.banner}>
               {profile.banner_url ? (
-                <Image source={{ uri: profile.banner_url }} style={StyleSheet.absoluteFill} />
+                <Image
+                  source={{ uri: profile.banner_url }}
+                  style={StyleSheet.absoluteFill}
+                  contentFit="cover"
+                />
               ) : null}
             </View>
 
@@ -370,7 +377,12 @@ export function UserProfileScreen({ route, navigation }: Props) {
             style={styles.gridImage}
             onPress={() => navigation.navigate('PostDetail', { postId: item.id })}
           >
-            <Image source={{ uri: item.image_url }} style={styles.gridImageInner} />
+            <Image
+              source={{ uri: item.image_url }}
+              style={styles.gridImageInner}
+              contentFit="cover"
+              recyclingKey={item.id}
+            />
           </Pressable>
         )}
       />

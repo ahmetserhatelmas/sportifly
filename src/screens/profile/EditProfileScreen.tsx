@@ -1,9 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { Image } from 'expo-image';
 import React, { useState } from 'react';
 import {
   Alert,
-  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -74,7 +74,7 @@ export function EditProfileScreen({ navigation }: Props) {
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <Pressable style={styles.banner} onPress={changeBanner}>
           {bannerUrl ? (
-            <Image source={{ uri: bannerUrl }} style={StyleSheet.absoluteFill} />
+            <Image source={{ uri: bannerUrl }} style={StyleSheet.absoluteFill} contentFit="cover" />
           ) : null}
           <View style={styles.bannerOverlay}>
             <Ionicons name="camera" size={20} color="#fff" />

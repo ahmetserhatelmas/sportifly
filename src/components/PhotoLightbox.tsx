@@ -1,6 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import React, { useEffect, useState } from 'react';
-import { Image, Modal, Pressable, StyleSheet, useWindowDimensions } from 'react-native';
+import {
+  Image as RNImage,
+  Modal,
+  Pressable,
+  StyleSheet,
+  useWindowDimensions,
+} from 'react-native';
 
 export function PhotoLightbox({
   uri,
@@ -20,7 +27,7 @@ export function PhotoLightbox({
       return;
     }
     let cancelled = false;
-    Image.getSize(
+    RNImage.getSize(
       uri,
       (w, h) => {
         if (!cancelled && w > 0 && h > 0) setNatural({ w, h });
@@ -48,7 +55,7 @@ export function PhotoLightbox({
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
         <Pressable onPress={() => {}}>
-          <Image source={{ uri }} style={size} resizeMode="contain" />
+          <Image source={{ uri }} style={size} contentFit="contain" />
         </Pressable>
         <Pressable style={styles.close} onPress={onClose} hitSlop={12}>
           <Ionicons name="close" size={28} color="#fff" />

@@ -37,7 +37,7 @@ export function FollowsScreen({ route, navigation }: Props) {
     const visible = (rows: any[]): Profile[] =>
       rows
         .map((r) => r.profiles as Profile | null)
-        .filter((p): p is Profile => Boolean(p) && !blocked.has(p.id));
+        .filter((p): p is Profile => p !== null && !blocked.has(p.id));
     setFollowers(visible((followersRes.data as any[]) ?? []));
     setFollowing(visible((followingRes.data as any[]) ?? []));
   }, [userId, session?.user.id]);

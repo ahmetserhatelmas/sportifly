@@ -1,9 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { Image } from 'expo-image';
 import React, { useCallback, useState } from 'react';
 import {
   Alert,
-  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -52,6 +52,7 @@ export function ListingDetailScreen({ route, navigation }: Props) {
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedHour, setSelectedHour] = useState<number | null>(null);
   const [bookedHours, setBookedHours] = useState<number[]>([]);
+  const [blockedHours, setBlockedHours] = useState<number[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   const fetchAll = useCallback(async () => {
@@ -79,12 +80,23 @@ export function ListingDetailScreen({ route, navigation }: Props) {
   }, [listingId, session?.user.id]);
 
   const fetchBooked = useCallback(async (date: Date) => {
-    const { data } = await supabase.rpc('listing_booked_slots', {
-      p_listing_id: listingId,
-      p_date: localDateString(date),
-    });
+    const day = localDateString(date);
+    const [{ data }, { data: blocks }] = await Promise.all([
+      supabase.rpc('listing_booked_slots', {
+        p_listing_id: listingId,
+        p_date: day,
+      }),
+      supabase
+        .from('listing_slot_blocks')
+        .select('slot_time')
+        .eq('listing_id', listingId)
+        .eq('slot_date', day),
+    ]);
     setBookedHours(
       ((data as { slot_time: string }[] | null) ?? []).map((r) => slotHour(r.slot_time))
+    );
+    setBlockedHours(
+      ((blocks as { slot_time: string }[] | null) ?? []).map((r) => slotHour(r.slot_time))
     );
   }, [listingId]);
 
@@ -198,6 +210,45 @@ export function ListingDetailScreen({ route, navigation }: Props) {
     ]);
   };
 
+  const slotTime = (hour: number) => `${String(hour).padStart(2, '0')}:00:00`;
+
+  const markSlotFull = async (hour: number) => {
+    if (!session || !dateStr) return;
+    const { error } = await supabase.from('listing_slot_blocks').insert({
+      listing_id: listingId,
+      slot_date: dateStr,
+      slot_time: slotTime(hour),
+      created_by: session.user.id,
+    });
+    if (error) {
+      Alert.alert(
+        'İşlem başarısız',
+        error.message?.includes('uygulamadan dolu')
+          ? 'Bu saat uygulamadan zaten alınmış.'
+          : 'Saat dolu işaretlenemedi. Supabase’de 29_slot_blocks.sql çalıştırıldığından emin ol.'
+      );
+      return;
+    }
+    fetchAll();
+    if (viewDate) fetchBooked(viewDate);
+  };
+
+  const clearSlotBlock = async (hour: number) => {
+    if (!dateStr) return;
+    const { error } = await supabase
+      .from('listing_slot_blocks')
+      .delete()
+      .eq('listing_id', listingId)
+      .eq('slot_date', dateStr)
+      .eq('slot_time', slotTime(hour));
+    if (error) {
+      Alert.alert('İşlem başarısız', 'Kilit kaldırılamadı.');
+      return;
+    }
+    fetchAll();
+    if (viewDate) fetchBooked(viewDate);
+  };
+
   const decideRequest = async (purchase: Purchase, status: 'accepted' | 'rejected') => {
     const { error } = await supabase
       .from('purchases')
@@ -254,7 +305,8 @@ export function ListingDetailScreen({ route, navigation }: Props) {
           {isField ? 'Saha takvimi' : 'Ders takvimi'}
         </Text>
         <Text style={styles.bookingHint}>
-          Önümüzdeki 7 gün · {formatOpenDays(openDays)}. Boş, bekleyen talep ve dolu saatleri buradan görürsün.
+          Önümüzdeki 7 gün · {formatOpenDays(openDays)}. Boş saate basıp elden ödeme / dışarıdan rezervasyon için
+          dolu işaretleyebilirsin. Dolu · Elden saate basınca tekrar açılır.
         </Text>
         <View style={styles.legendRow}>
           <View style={styles.legendItem}>
@@ -300,14 +352,25 @@ export function ListingDetailScreen({ route, navigation }: Props) {
                 const rows = hourPurchases(h);
                 const accepted = rows.find((p) => p.status === 'accepted');
                 const pending = rows.filter((p) => p.status === 'pending');
+                const blocked = blockedHours.includes(h);
                 const isPast =
                   dateStr === localDateString() && h <= new Date().getHours();
-                const state = accepted ? 'full' : pending.length > 0 ? 'pending' : isPast ? 'past' : 'empty';
+                const state = accepted
+                  ? 'full'
+                  : blocked
+                    ? 'blocked'
+                    : pending.length > 0
+                      ? 'pending'
+                      : isPast
+                        ? 'past'
+                        : 'empty';
                 const who = accepted?.profiles?.username ?? pending[0]?.profiles?.username;
                 const label =
                   state === 'full'
                     ? `Dolu${who ? ` · ${who}` : ''}`
-                    : state === 'pending'
+                    : state === 'blocked'
+                      ? 'Dolu · Elden'
+                      : state === 'pending'
                       ? pending.length > 1
                         ? `Bekliyor · ${pending.length} talep`
                         : `Bekliyor${who ? ` · ${who}` : ''}`
@@ -319,19 +382,53 @@ export function ListingDetailScreen({ route, navigation }: Props) {
                     key={h}
                     onPress={() => {
                       if (accepted) {
-                        Alert.alert(hourRangeLabel(h), `${who ?? 'Kullanıcı'} bu saati aldı.`);
-                      } else if (pending.length > 0) {
+                        Alert.alert(hourRangeLabel(h), `${who ?? 'Kullanıcı'} bu saati uygulamadan aldı.`);
+                        return;
+                      }
+                      if (blocked) {
+                        Alert.alert(
+                          hourRangeLabel(h),
+                          'Bu saat elden / dışarıdan rezervasyon için kapatılmış.',
+                          [
+                            { text: 'Vazgeç', style: 'cancel' },
+                            {
+                              text: 'Saati aç',
+                              onPress: () => clearSlotBlock(h),
+                            },
+                          ]
+                        );
+                        return;
+                      }
+                      if (pending.length > 0) {
                         Alert.alert(
                           hourRangeLabel(h),
                           pending.map((p) => p.profiles?.username ?? 'Kullanıcı').join(', ') +
-                            ' onay bekliyor. Aşağıdaki gelen taleplerden karar verebilirsin.'
+                            ' onay bekliyor. Elden doldurursan bekleyen talepler reddedilir.',
+                          [
+                            { text: 'Vazgeç', style: 'cancel' },
+                            {
+                              text: 'Dolu işaretle',
+                              style: 'destructive',
+                              onPress: () => markSlotFull(h),
+                            },
+                          ]
                         );
+                        return;
                       }
+                      if (isPast) return;
+                      Alert.alert(
+                        hourRangeLabel(h),
+                        'Elden ödeme veya dışarıdan rezervasyon aldıysan bu saati dolu işaretle. Başkası talep atamaz.',
+                        [
+                          { text: 'Vazgeç', style: 'cancel' },
+                          { text: 'Dolu işaretle', onPress: () => markSlotFull(h) },
+                        ]
+                      );
                     }}
                     style={[
                       styles.slot,
                       styles.ownerSlot,
-                      state === 'full' && styles.slotFull,
+                      (state === 'full' || state === 'blocked') && styles.slotFull,
                       state === 'pending' && styles.slotPending,
                       state === 'past' && styles.slotPast,
                     ]}
@@ -339,7 +436,7 @@ export function ListingDetailScreen({ route, navigation }: Props) {
                     <Text
                       style={[
                         styles.slotText,
-                        state === 'full' && { color: colors.danger },
+                        (state === 'full' || state === 'blocked') && { color: colors.danger },
                         state === 'pending' && { color: '#B45309' },
                         state === 'past' && { color: colors.textMuted },
                       ]}
@@ -349,7 +446,7 @@ export function ListingDetailScreen({ route, navigation }: Props) {
                     <Text
                       style={[
                         styles.slotStatus,
-                        state === 'full' && { color: colors.danger },
+                        (state === 'full' || state === 'blocked') && { color: colors.danger },
                         state === 'pending' && { color: '#B45309' },
                         state === 'past' && { color: colors.textMuted },
                       ]}
@@ -375,7 +472,7 @@ export function ListingDetailScreen({ route, navigation }: Props) {
         </Text>
         <Text style={styles.bookingHint}>
           Her seans 1 saat. Yalnızca önümüzdeki 7 gün ve açık günler ({formatOpenDays(openDays)})
-          seçilebilir. İlan sahibi onaylayınca o saat başkasına kapanır.
+          seçilebilir. İlan sahibi onaylayınca veya saati elden doldurunca o saat başkasına kapanır.
         </Text>
         {upcomingDates.length === 0 ? (
           <Text style={styles.noSlots}>Bu hafta müsait gün yok.</Text>
@@ -499,7 +596,7 @@ export function ListingDetailScreen({ route, navigation }: Props) {
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       <ScrollView contentContainerStyle={{ paddingBottom: 32 }}>
         {listing.image_url ? (
-          <Image source={{ uri: listing.image_url }} style={styles.hero} />
+          <Image source={{ uri: listing.image_url }} style={styles.hero} contentFit="cover" />
         ) : null}
 
         <View style={styles.body}>

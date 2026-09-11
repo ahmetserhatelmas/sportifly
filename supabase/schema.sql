@@ -303,6 +303,41 @@ create policy "Onaylı talebi olan kullanıcı değerlendirme yapabilir"
     )
   );
 
+create table if not exists public.listing_slot_blocks (
+  id uuid primary key default gen_random_uuid(),
+  listing_id uuid not null references public.listings (id) on delete cascade,
+  slot_date date not null,
+  slot_time time not null,
+  created_by uuid not null references public.profiles (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  unique (listing_id, slot_date, slot_time)
+);
+
+alter table public.listing_slot_blocks enable row level security;
+
+create policy "Herkes kilitli saatleri görebilir"
+  on public.listing_slot_blocks for select
+  using (true);
+
+create policy "İlan sahibi saat kilitleyebilir"
+  on public.listing_slot_blocks for insert
+  with check (
+    auth.uid() = created_by
+    and exists (
+      select 1 from public.listings l
+      where l.id = listing_slot_blocks.listing_id and l.owner_id = auth.uid()
+    )
+  );
+
+create policy "İlan sahibi kilit kaldırabilir"
+  on public.listing_slot_blocks for delete
+  using (
+    exists (
+      select 1 from public.listings l
+      where l.id = listing_slot_blocks.listing_id and l.owner_id = auth.uid()
+    )
+  );
+
 create or replace function public.listing_booked_slots(p_listing_id uuid, p_date date)
 returns table (slot_time time)
 language sql
@@ -315,10 +350,49 @@ as $$
   where p.listing_id = p_listing_id
     and p.slot_date = p_date
     and p.status = 'accepted'
-    and p.slot_time is not null;
+    and p.slot_time is not null
+  union
+  select b.slot_time
+  from public.listing_slot_blocks b
+  where b.listing_id = p_listing_id
+    and b.slot_date = p_date;
 $$;
 
 grant execute on function public.listing_booked_slots(uuid, date) to authenticated, anon;
+
+create or replace function public.reject_pending_on_slot_block()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if exists (
+    select 1 from public.purchases p
+    where p.listing_id = new.listing_id
+      and p.slot_date = new.slot_date
+      and p.slot_time = new.slot_time
+      and p.status = 'accepted'
+  ) then
+    raise exception 'Bu saat zaten uygulamadan dolu';
+  end if;
+
+  update public.purchases
+  set status = 'rejected'
+  where listing_id = new.listing_id
+    and slot_date = new.slot_date
+    and slot_time = new.slot_time
+    and status = 'pending';
+
+  return new;
+end;
+$$;
+
+drop trigger if exists listing_slot_blocks_reject_pending on public.listing_slot_blocks;
+create trigger listing_slot_blocks_reject_pending
+  before insert on public.listing_slot_blocks
+  for each row
+  execute function public.reject_pending_on_slot_block();
 
 create or replace function public.enforce_booking_window()
 returns trigger
@@ -346,6 +420,15 @@ begin
 
   if v_days is not null and not (v_dow = any (v_days)) then
     raise exception 'Bu günde ilan müsait değil';
+  end if;
+
+  if exists (
+    select 1 from public.listing_slot_blocks b
+    where b.listing_id = new.listing_id
+      and b.slot_date = new.slot_date
+      and b.slot_time = new.slot_time
+  ) then
+    raise exception 'Bu saat dolu';
   end if;
 
   return new;
@@ -392,26 +475,43 @@ language plpgsql
 security definer
 set search_path = public, extensions, net
 as $$
+declare
+  v_headers jsonb;
+  v_body jsonb;
 begin
   if p_token is null or length(trim(p_token)) = 0 then
     return;
   end if;
 
-  perform net.http_post(
-    url := 'https://exp.host/--/api/v2/push/send',
-    headers := jsonb_build_object(
-      'Content-Type', 'application/json',
-      'Accept', 'application/json'
-    ),
-    body := jsonb_build_object(
-      'to', p_token,
-      'title', p_title,
-      'body', p_body,
-      'sound', 'default',
-      'channelId', 'reservations',
-      'priority', 'high'
-    )
+  v_headers := jsonb_build_object(
+    'Content-Type', 'application/json',
+    'Accept', 'application/json'
   );
+  v_body := jsonb_build_object(
+    'to', p_token,
+    'title', p_title,
+    'body', p_body,
+    'sound', 'default',
+    'channelId', 'reservations',
+    'priority', 'high'
+  );
+
+  begin
+    perform net.http_post(
+      url := 'https://exp.host/--/api/v2/push/send',
+      headers := v_headers,
+      body := v_body
+    );
+  exception
+    when undefined_function then
+      perform extensions.http_post(
+        url := 'https://exp.host/--/api/v2/push/send',
+        headers := v_headers,
+        body := v_body
+      );
+    when others then
+      return;
+  end;
 exception
   when others then
     return;
@@ -429,6 +529,10 @@ declare
   v_enabled boolean;
   v_name text;
 begin
+  if new.sender_id = new.receiver_id then
+    return new;
+  end if;
+
   if exists (
     select 1 from public.chat_mutes m
     where m.user_id = new.receiver_id and m.partner_id = new.sender_id
@@ -473,7 +577,6 @@ declare
   v_when text;
   v_push_title text;
   v_push_body text;
-  v_token text;
 begin
   select owner_id, title, type into v_owner, v_title, v_type
   from public.listings
@@ -513,8 +616,7 @@ begin
       new.listing_id
     );
 
-    select expo_push_token into v_token from public.profiles where id = v_owner;
-    perform public.try_send_expo_push(v_token, v_push_title, v_push_body);
+    -- Push istemciden gider (push_after_booking); çift bildirim olmasın.
 
   elsif TG_OP = 'UPDATE' and old.status is distinct from new.status and new.status in ('accepted', 'rejected') then
     v_push_title := case when new.status = 'accepted' then 'Talebin onaylandı' else 'Talebin reddedildi' end;
@@ -539,8 +641,7 @@ begin
       new.listing_id
     );
 
-    select expo_push_token into v_token from public.profiles where id = new.user_id;
-    perform public.try_send_expo_push(v_token, v_push_title, v_push_body);
+    -- Push istemciden gider (push_after_decision); çift bildirim olmasın.
   end if;
 
   return new;
@@ -1151,6 +1252,185 @@ $$;
 
 grant execute on function public.push_after_booking(uuid) to authenticated;
 grant execute on function public.push_after_decision(uuid) to authenticated;
+
+create or replace function public.push_after_dm(p_message_id uuid)
+returns json
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  rec record;
+begin
+  select
+    recv.expo_push_token as token,
+    coalesce(recv.push_enabled, true) as enabled,
+    coalesce(nullif(trim(send.full_name), ''), send.username, 'Yeni mesaj') as title,
+    left(coalesce(m.content, ''), 120) as body,
+    m.sender_id,
+    m.receiver_id
+  into rec
+  from public.direct_messages m
+  join public.profiles recv on recv.id = m.receiver_id
+  join public.profiles send on send.id = m.sender_id
+  where m.id = p_message_id
+    and m.sender_id = auth.uid();
+
+  if rec.token is null or rec.token = '' or not rec.enabled then
+    return null;
+  end if;
+  if rec.sender_id = rec.receiver_id then
+    return null;
+  end if;
+  if exists (
+    select 1 from public.chat_mutes
+    where user_id = rec.receiver_id and partner_id = rec.sender_id
+  ) then
+    return null;
+  end if;
+
+  return json_build_object('token', rec.token, 'title', rec.title, 'body', rec.body);
+end;
+$$;
+
+grant execute on function public.push_after_dm(uuid) to authenticated;
+
+create or replace function public.push_social(
+  p_user_id uuid,
+  p_from_id uuid,
+  p_type text,
+  p_title text,
+  p_body text,
+  p_post_id uuid default null
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_token text;
+  v_enabled boolean;
+begin
+  if p_user_id is null or p_from_id is null or p_user_id = p_from_id then
+    return;
+  end if;
+
+  if exists (
+    select 1 from public.blocks
+    where (blocker_id = p_user_id and blocked_id = p_from_id)
+       or (blocker_id = p_from_id and blocked_id = p_user_id)
+  ) then
+    return;
+  end if;
+
+  insert into public.notifications (user_id, type, title, body, post_id, from_user_id)
+  values (p_user_id, p_type, p_title, p_body, p_post_id, p_from_id);
+
+  select expo_push_token, coalesce(push_enabled, true)
+    into v_token, v_enabled
+  from public.profiles
+  where id = p_user_id;
+
+  if coalesce(v_enabled, true) then
+    perform public.try_send_expo_push(v_token, p_title, p_body);
+  end if;
+end;
+$$;
+
+create or replace function public.notify_follow()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_name text;
+begin
+  select coalesce(nullif(trim(full_name), ''), username) into v_name
+  from public.profiles where id = new.follower_id;
+
+  perform public.push_social(
+    new.following_id,
+    new.follower_id,
+    'follow',
+    'Yeni takipçi',
+    coalesce(v_name, 'Birisi') || ' seni takip etmeye başladı'
+  );
+  return new;
+end;
+$$;
+
+create or replace function public.notify_like()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_owner uuid;
+  v_name text;
+begin
+  select user_id into v_owner from public.posts where id = new.post_id;
+  select coalesce(nullif(trim(full_name), ''), username) into v_name
+  from public.profiles where id = new.user_id;
+
+  perform public.push_social(
+    v_owner,
+    new.user_id,
+    'like',
+    'Yeni beğeni',
+    coalesce(v_name, 'Birisi') || ' gönderini beğendi',
+    new.post_id
+  );
+  return new;
+end;
+$$;
+
+create or replace function public.notify_comment()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_owner uuid;
+  v_name text;
+begin
+  select user_id into v_owner from public.posts where id = new.post_id;
+  select coalesce(nullif(trim(full_name), ''), username) into v_name
+  from public.profiles where id = new.user_id;
+
+  perform public.push_social(
+    v_owner,
+    new.user_id,
+    'comment',
+    'Yeni yorum',
+    coalesce(v_name, 'Birisi') || ': ' || left(coalesce(new.content, ''), 80),
+    new.post_id
+  );
+  return new;
+end;
+$$;
+
+drop trigger if exists follows_notify on public.follows;
+create trigger follows_notify
+  after insert on public.follows
+  for each row
+  execute function public.notify_follow();
+
+drop trigger if exists post_likes_notify on public.post_likes;
+create trigger post_likes_notify
+  after insert on public.post_likes
+  for each row
+  execute function public.notify_like();
+
+drop trigger if exists post_comments_notify on public.post_comments;
+create trigger post_comments_notify
+  after insert on public.post_comments
+  for each row
+  execute function public.notify_comment();
 
 -- ---------------------------------------------------------------------
 -- 8. STORAGE BUCKET'LARI (görseller)

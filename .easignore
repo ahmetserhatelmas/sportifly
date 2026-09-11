@@ -1,0 +1,52 @@
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+*.pem
+
+# local env files — EAS preview env provides EXPO_PUBLIC_*
+.env
+.env*.local
+
+# typescript
+*.tsbuildinfo
+
+# generated native folders (EAS Prebuild)
+/ios
+/android
+
+# local APK / build artifacts
+*.apk
+*.aab
+
+# Firebase admin — asla yükleme
+google-service-account.json
+*-firebase-adminsdk-*.json
+google-services.json
+
+# FCM client config — build için gerekli
+!google-services.json

@@ -1,7 +1,7 @@
 import { Session } from '@supabase/supabase-js';
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
-import { registerPushToken } from '../lib/push';
+import { registerPushToken, unregisterPushToken } from '../lib/push';
 import { supabase } from '../lib/supabase';
 import { Profile } from '../types';
 
@@ -71,6 +71,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
+    // Çıkışta token'ı sil; yoksa bu telefon eski hesabın bildirimlerini almaya devam eder.
+    const uid = userIdRef.current;
+    if (uid) await unregisterPushToken(uid);
     await supabase.auth.signOut();
   };
 

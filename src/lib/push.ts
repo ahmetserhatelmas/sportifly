@@ -13,19 +13,40 @@ function isAndroidExpoGo() {
   return Platform.OS === 'android' && Constants.appOwnership === 'expo';
 }
 
+export async function initNotificationHandler() {
+  try {
+    const Notifications = await loadNotifications();
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
+      }),
+    });
+  } catch {
+    // Native modül yoksa uygulamayı düşürme.
+  }
+}
+
 export async function setPushEnabled(userId: string, enabled: boolean) {
   const { error } = await supabase
     .from('profiles')
     .update(enabled ? { push_enabled: true } : { push_enabled: false, expo_push_token: null })
     .eq('id', userId);
-  if (error) return error;
-  if (enabled) await registerPushToken(userId);
+  if (error) return error.message;
+  if (enabled) return registerPushToken(userId);
   return null;
 }
 
-export async function registerPushToken(userId: string) {
-  // Android Expo Go (SDK 53+) remote token alamaz. iOS Expo Go ve APK/TestFlight alır.
-  if (isAndroidExpoGo() || !Device.isDevice) return;
+export async function registerPushToken(userId: string): Promise<string | null> {
+  // Android Expo Go (SDK 53+) remote push yok. iOS simülatör + TestFlight token alabilir.
+  if (isAndroidExpoGo()) {
+    return 'Android Expo Go bildirim alamaz. TestFlight veya APK kullan.';
+  }
+  if (Platform.OS === 'android' && !Device.isDevice) {
+    return 'Android emülatöründe uzak bildirim yok.';
+  }
 
   try {
     const { data: prefs } = await supabase
@@ -33,7 +54,9 @@ export async function registerPushToken(userId: string) {
       .select('push_enabled')
       .eq('id', userId)
       .maybeSingle();
-    if ((prefs as { push_enabled?: boolean } | null)?.push_enabled === false) return;
+    if ((prefs as { push_enabled?: boolean } | null)?.push_enabled === false) {
+      return 'Bildirimler kapalı.';
+    }
 
     const Notifications = await loadNotifications();
     Notifications.setNotificationHandler({
@@ -57,10 +80,14 @@ export async function registerPushToken(userId: string) {
     const existing = await Notifications.getPermissionsAsync();
     let status = existing.status;
     if (status !== 'granted') {
-      const asked = await Notifications.requestPermissionsAsync();
+      const asked = await Notifications.requestPermissionsAsync({
+        ios: { allowAlert: true, allowBadge: true, allowSound: true },
+      });
       status = asked.status;
     }
-    if (status !== 'granted') return;
+    if (status !== 'granted') {
+      return 'Bildirim izni verilmedi. iPhone Ayarlar → Sportifly → Bildirimler.';
+    }
 
     const projectId =
       Constants.expoConfig?.extra?.eas?.projectId ??
@@ -68,12 +95,45 @@ export async function registerPushToken(userId: string) {
       EAS_PROJECT_ID;
 
     const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
-    if (!token) return;
+    if (!token) return 'Push token alınamadı.';
 
-    await supabase.from('profiles').update({ expo_push_token: token }).eq('id', userId);
-  } catch {
-    // Native modül yoksa uygulamayı düşürme.
+    // claim_push_token: aynı cihaz token'ı başka hesapta kalmışsa temizler (migration 30).
+    const { error: rpcError } = await supabase.rpc('claim_push_token', { p_token: token });
+    if (!rpcError) return null;
+
+    // RPC henüz yoksa eski yol.
+    const { error } = await supabase
+      .from('profiles')
+      .update({ expo_push_token: token })
+      .eq('id', userId);
+    if (error) return `Token kaydedilemedi: ${error.message}`;
+    return null;
+  } catch (e) {
+    return e instanceof Error ? e.message : 'Bildirim kaydı başarısız.';
   }
+}
+
+/** Çıkışta çağrılır: bu hesabın token'ını siler, cihaz artık bu hesabın push'unu almaz. */
+export async function unregisterPushToken(userId: string) {
+  try {
+    await supabase.from('profiles').update({ expo_push_token: null }).eq('id', userId);
+  } catch {
+    // Ağ yoksa çıkışı engelleme.
+  }
+}
+
+export async function sendTestPush(userId: string) {
+  const reg = await registerPushToken(userId);
+  if (reg) return reg;
+  const { data } = await supabase
+    .from('profiles')
+    .select('expo_push_token')
+    .eq('id', userId)
+    .maybeSingle();
+  const token = (data as { expo_push_token?: string } | null)?.expo_push_token;
+  if (!token) return 'Token hâlâ yok. TestFlight ile açıp bildirim izni ver.';
+  await sendExpoPush({ token, title: 'Sportifly', body: 'Bildirimler çalışıyor.' });
+  return null;
 }
 
 export async function sendExpoPush(payload: { token: string; title: string; body: string } | null) {
@@ -100,6 +160,18 @@ export async function sendExpoPush(payload: { token: string; title: string; body
   }
 }
 
+export async function pushSocial(targetId: string, title: string, body: string) {
+  if (!targetId) return;
+  const { data } = await supabase
+    .from('profiles')
+    .select('expo_push_token, push_enabled')
+    .eq('id', targetId)
+    .maybeSingle();
+  const row = data as { expo_push_token?: string | null; push_enabled?: boolean } | null;
+  if (!row?.expo_push_token || row.push_enabled === false) return;
+  await sendExpoPush({ token: row.expo_push_token, title, body });
+}
+
 async function pushToProfile(userId: string, title: string, body: string) {
   const { data } = await supabase
     .from('profiles')
@@ -109,6 +181,31 @@ async function pushToProfile(userId: string, title: string, body: string) {
   const token = (data as { expo_push_token?: string } | null)?.expo_push_token;
   if (!token) return;
   await sendExpoPush({ token, title, body });
+}
+
+export async function pushAfterDirectMessage(
+  messageId: string,
+  fallback?: { receiverId: string; title: string; body: string }
+) {
+  const { data } = await supabase.rpc('push_after_dm', { p_message_id: messageId });
+  const payload = data as { token?: string; title?: string; body?: string } | null;
+  if (payload?.token && payload.title) {
+    await sendExpoPush({ token: payload.token, title: payload.title, body: payload.body ?? '' });
+    return;
+  }
+  if (!fallback?.receiverId) return;
+  const { data: recv } = await supabase
+    .from('profiles')
+    .select('expo_push_token, push_enabled')
+    .eq('id', fallback.receiverId)
+    .maybeSingle();
+  const row = recv as { expo_push_token?: string | null; push_enabled?: boolean } | null;
+  if (!row?.expo_push_token || row.push_enabled === false) return;
+  await sendExpoPush({
+    token: row.expo_push_token,
+    title: fallback.title,
+    body: fallback.body,
+  });
 }
 
 export async function pushOwnerAfterBooking(purchaseId: string) {

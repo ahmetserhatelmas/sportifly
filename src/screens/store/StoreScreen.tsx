@@ -1,10 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { Image } from 'expo-image';
 import React, { useCallback, useState } from 'react';
 import {
   FlatList,
-  Image,
   Pressable,
   RefreshControl,
   StyleSheet,
@@ -35,17 +35,17 @@ export function StoreScreen() {
     (tab === 'field' ? !!profile?.is_field_owner : !!profile?.is_instructor);
 
   const fetchListings = useCallback(async () => {
-    const { data, error } = await supabase
-      .from('listings')
-      .select('*, profiles(*), listing_reviews(rating)')
-      .eq('type', tab)
-      .order('created_at', { ascending: false })
-      .limit(50);
+    const [{ data, error }, blocked] = await Promise.all([
+      supabase
+        .from('listings')
+        .select('*, profiles(*), listing_reviews(rating)')
+        .eq('type', tab)
+        .order('created_at', { ascending: false })
+        .limit(50),
+      session?.user.id ? fetchBlockedIds(session.user.id) : Promise.resolve(new Set<string>()),
+    ]);
 
     if (!error && data) {
-      const blocked = session?.user.id
-        ? await fetchBlockedIds(session.user.id)
-        : new Set<string>();
       setListings(
         data
           .filter((l: any) => !blocked.has(l.owner_id))
@@ -99,6 +99,10 @@ export function StoreScreen() {
         keyExtractor={(item) => item.id}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         contentContainerStyle={{ paddingTop: 12, paddingBottom: 100 }}
+        initialNumToRender={8}
+        maxToRenderPerBatch={8}
+        windowSize={7}
+        removeClippedSubviews
         ListEmptyComponent={
           <EmptyState
             icon={tab === 'field' ? 'business-outline' : 'school-outline'}
@@ -116,7 +120,13 @@ export function StoreScreen() {
             onPress={() => navigation.navigate('ListingDetail', { listingId: item.id })}
           >
             {item.image_url ? (
-              <Image source={{ uri: item.image_url }} style={styles.cardImage} />
+              <Image
+                source={{ uri: item.image_url }}
+                style={styles.cardImage}
+                contentFit="cover"
+                recyclingKey={item.id}
+                transition={120}
+              />
             ) : (
               <View style={[styles.cardImage, styles.cardImageFallback]}>
                 <Ionicons

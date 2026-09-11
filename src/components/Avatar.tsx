@@ -1,5 +1,6 @@
+import { Image } from 'expo-image';
 import React from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors } from '../theme';
 
 type Props = {
@@ -18,7 +19,12 @@ export function Avatar({ uri, name, size = 40, onPress }: Props) {
     .toUpperCase();
 
   const body = uri ? (
-    <Image source={{ uri }} style={{ width: size, height: size, borderRadius: size / 2 }} />
+    <Image
+      source={{ uri }}
+      style={{ width: size, height: size, borderRadius: size / 2 }}
+      contentFit="cover"
+      recyclingKey={uri}
+    />
   ) : (
     <View
       style={[

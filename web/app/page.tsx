@@ -107,10 +107,10 @@ export default function HomePage() {
 
           <div className="relative mx-auto flex w-full max-w-md items-end justify-center gap-4">
             <div className="hidden w-[42%] translate-y-10 sm:block">
-              <Phone src="/screens/listing.jpg" alt="Sportifly saha ilanı ve kiralama ekranı" />
+              <Phone src="/screens/listing-2.jpg" alt="Sportifly saha ilanı ve kiralama ekranı" />
             </div>
             <div className="w-[70%] sm:w-[50%]">
-              <Phone src="/screens/feed.jpg" alt="Sportifly ana akış ekranı" priority />
+              <Phone src="/screens/feed-2.jpg" alt="Sportifly ana akış ekranı" priority />
             </div>
           </div>
         </div>
@@ -177,10 +177,10 @@ export default function HomePage() {
           </div>
           <div className="mt-12 grid grid-cols-2 gap-5 md:grid-cols-4">
             {[
-              ["/screens/search.jpg", "Düello arama", "Yakınındaki açık lobileri filtrele"],
-              ["/screens/store.jpg", "Mağaza", "Saha ve ders ilanları, saatlik fiyatlar"],
-              ["/screens/chat.jpg", "Mesajlar", "Rakiplerin ve saha sahipleriyle anlık sohbet"],
-              ["/screens/profile.jpg", "Profil", "İstatistikler ve katıldığın maçlar"],
+              ["/screens/search-2.jpg", "Düello arama", "Yakınındaki açık lobileri filtrele"],
+              ["/screens/store-2.jpg", "Mağaza", "Saha ve ders ilanları, saatlik fiyatlar"],
+              ["/screens/chat-2.jpg", "Mesajlar", "Rakiplerin ve saha sahipleriyle anlık sohbet"],
+              ["/screens/profile-2.jpg", "Profil", "İstatistikler ve katıldığın maçlar"],
             ].map(([src, t, d]) => (
               <figure key={src}>
                 <Phone src={src} alt={`${t} ekranı`} className="border-white/15 shadow-black/40" />

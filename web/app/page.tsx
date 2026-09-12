@@ -179,8 +179,8 @@ export default function HomePage() {
             {[
               ["/screens/search.jpg", "Düello arama", "Yakınındaki açık lobileri filtrele"],
               ["/screens/store.jpg", "Mağaza", "Saha ve ders ilanları, saatlik fiyatlar"],
-              ["/screens/listing.jpg", "Kiralama", "Gün ve saat seç, talebini gönder"],
-              ["/screens/profile.jpg", "Profil", "İstatistikler ve paylaşımların"],
+              ["/screens/chat.jpg", "Mesajlar", "Rakiplerin ve saha sahipleriyle anlık sohbet"],
+              ["/screens/profile.jpg", "Profil", "İstatistikler ve katıldığın maçlar"],
             ].map(([src, t, d]) => (
               <figure key={src}>
                 <Phone src={src} alt={`${t} ekranı`} className="border-white/15 shadow-black/40" />

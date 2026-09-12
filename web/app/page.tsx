@@ -84,7 +84,7 @@ export default function HomePage() {
           <div>
             <span className="inline-flex items-center gap-2 rounded-full border border-brand/40 bg-brand-soft px-3 py-1 text-xs font-semibold text-brand-dark">
               <span className="h-1.5 w-1.5 rounded-full bg-brand" />
-              iOS ve Android&apos;de yayında
+              iOS ve Android&apos;de yakında
             </span>
             <h1 className="mt-5 text-4xl font-extrabold leading-[1.05] tracking-tight text-ink md:text-6xl">
               Rakibini bul,

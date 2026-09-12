@@ -1,5 +1,3 @@
-import { site } from "@/lib/site";
-
 function AppleIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -22,30 +20,26 @@ export function StoreBadges({ compact = false }: { compact?: boolean }) {
     : "px-5 py-3 text-sm";
   return (
     <div className="flex flex-wrap items-center gap-3">
-      <a
-        href={site.appStoreUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className={`inline-flex items-center gap-2.5 rounded-xl bg-ink text-white transition hover:bg-black ${base}`}
+      <span
+        className={`inline-flex cursor-default items-center gap-2.5 rounded-xl bg-ink text-white ${base}`}
+        aria-label="App Store — yakında"
       >
         <AppleIcon />
         <span className="leading-tight">
-          <span className="block text-[10px] font-medium opacity-75">İndir</span>
+          <span className="block text-[10px] font-medium opacity-75">Yakında</span>
           <span className="block font-semibold">App Store</span>
         </span>
-      </a>
-      <a
-        href={site.playStoreUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className={`inline-flex items-center gap-2.5 rounded-xl bg-ink text-white transition hover:bg-black ${base}`}
+      </span>
+      <span
+        className={`inline-flex cursor-default items-center gap-2.5 rounded-xl bg-ink text-white ${base}`}
+        aria-label="Google Play — yakında"
       >
         <PlayIcon />
         <span className="leading-tight">
-          <span className="block text-[10px] font-medium opacity-75">Edinin</span>
+          <span className="block text-[10px] font-medium opacity-75">Yakında</span>
           <span className="block font-semibold">Google Play</span>
         </span>
-      </a>
+      </span>
     </div>
   );
 }

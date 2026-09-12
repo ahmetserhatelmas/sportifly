@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #1f2430;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-brand: #52c5b6;
+  --color-brand-dark: #3baa9c;
+  --color-brand-soft: #e3f6f3;
+  --color-ink: #1f2430;
+  --color-ink-2: #6b7280;
+  --color-ink-3: #9ca3af;
+  --color-line: #e5e7eb;
+  --color-surface: #f4f6f8;
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* Yasal metin sayfaları */
+.prose-legal h2 {
+  margin-top: 2rem;
+  margin-bottom: 0.5rem;
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--color-ink);
+}
+.prose-legal p,
+.prose-legal li {
+  color: var(--color-ink-2);
+  line-height: 1.75;
+}
+.prose-legal p + p {
+  margin-top: 0.75rem;
+}
+.prose-legal ul {
+  margin: 0.75rem 0;
+  padding-left: 1.25rem;
+  list-style: disc;
+}
+.prose-legal a {
+  color: var(--color-brand-dark);
+  text-decoration: underline;
+}

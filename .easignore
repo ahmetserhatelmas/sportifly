@@ -39,6 +39,9 @@ yarn-error.*
 /ios
 /android
 
+# tanıtım web sitesi (Next.js) — mobil build'e dahil değil
+/web
+
 # local APK / build artifacts
 *.apk
 *.aab

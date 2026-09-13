@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { DownloadLink } from "@/components/download-link";
 import { Logo } from "@/components/logo";
 import { nav } from "@/lib/site";
 
@@ -26,12 +27,9 @@ export function Header() {
         </nav>
 
         <div className="hidden md:block">
-          <Link
-            href="/#indir"
-            className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-dark"
-          >
+          <DownloadLink className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-dark">
             Uygulamayı indir
-          </Link>
+          </DownloadLink>
         </div>
 
         <button
@@ -65,13 +63,12 @@ export function Header() {
                 {item.label}
               </Link>
             ))}
-            <Link
-              href="/#indir"
-              onClick={() => setOpen(false)}
+            <DownloadLink
+              onNavigate={() => setOpen(false)}
               className="mt-2 rounded-full bg-brand px-4 py-2.5 text-center text-sm font-semibold text-white"
             >
               Uygulamayı indir
-            </Link>
+            </DownloadLink>
           </nav>
         </div>
       ) : null}

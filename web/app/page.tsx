@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { HashScroll } from "@/components/hash-scroll";
 import { Icons } from "@/components/icons";
 import { Phone } from "@/components/phone";
 import { PaymentLogos } from "@/components/payment-logos";
@@ -74,6 +75,7 @@ const faqs = [
 export default function HomePage() {
   return (
     <>
+      <HashScroll />
       {/* HERO */}
       <section className="relative overflow-hidden bg-white">
         <div
@@ -92,7 +94,7 @@ export default function HomePage() {
               <span className="text-brand">sahaya çık.</span>
             </h1>
             <p className="mt-6 max-w-lg text-lg leading-7 text-ink-2">{site.description}</p>
-            <div className="mt-8" id="indir">
+            <div id="indir" className="mt-8 scroll-mt-28">
               <StoreBadges />
             </div>
             <ul className="mt-8 flex flex-wrap gap-x-6 gap-y-2 text-sm text-ink-2">

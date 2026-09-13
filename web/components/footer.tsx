@@ -47,9 +47,8 @@ export function Footer() {
           <h3 className="text-sm font-semibold text-ink">İletişim</h3>
           <address className="mt-3 space-y-1.5 text-sm not-italic leading-6 text-ink-2">
             <div className="font-medium text-ink">{c.legalName}</div>
+            <div>{c.kind}</div>
             <div>{c.address}</div>
-            <div>MERSİS: {c.mersis}</div>
-            <div>VKN: {c.taxId}</div>
             <div>
               <a href={`mailto:${c.email}`} className="hover:text-ink">
                 {c.email}
@@ -60,7 +59,6 @@ export function Footer() {
                 {c.phone}
               </a>
             </div>
-            <div>KEP: {c.kep}</div>
           </address>
           <Link href="/iletisim" className="mt-3 inline-block text-sm font-semibold text-brand-dark">
             Tüm iletişim bilgileri →

@@ -53,12 +53,15 @@ export default function AboutPage() {
 
         <h2>Şirket bilgileri</h2>
         <ul>
-          <li>Ticaret unvanı: {site.company.legalName}</li>
+          <li>Ad soyad / unvan: {site.company.legalName}</li>
+          <li>İşletme türü: {site.company.kind}</li>
           <li>İşletme adı / marka: {site.company.tradeName}</li>
-          <li>MERSİS: {site.company.mersis}</li>
-          <li>Vergi no: {site.company.taxId} ({site.company.taxOffice})</li>
           <li>Adres: {site.company.address}</li>
-          <li>Meslek odası: {site.company.chamber}</li>
+          <li>
+            E-posta:{" "}
+            <a href={`mailto:${site.company.email}`}>{site.company.email}</a>
+          </li>
+          <li>Telefon: {site.company.phone}</li>
         </ul>
       </div>
     </PageShell>

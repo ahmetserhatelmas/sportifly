@@ -1,30 +1,23 @@
 /**
- * Site geneli sabitler. iyzico başvurusu için "[DOLDUR]" ile işaretli alanların
- * gerçek şirket bilgileriyle doldurulması gerekir; İletişim sayfası ve alt bilgi
- * bu dosyadan okur.
+ * Site geneli sabitler. İletişim sayfası, alt bilgi ve yasal metinler buradan okur.
  */
 export const site = {
   name: "Sportifly",
   tagline: "Rakibini bul ve sahaya çık.",
   description:
     "Sportifly; futbol, basketbol, voleybol ve tenis gibi branşlarda rakip bulmanı, saha kiralamanı ve eğitmenlerden ders almanı tek uygulamada toplayan spor topluluğu.",
-  url: "https://sportifly.app", // [DOLDUR] yayın alan adı
+  url: "https://sportifly.app",
   appStoreUrl: "https://apps.apple.com/app/id6798912961",
   playStoreUrl: "https://play.google.com/store/apps/details?id=com.x4se.sportifly",
-  supportEmail: "destek@sportifly.app", // [DOLDUR]
+  supportEmail: "destek@sportifly.app",
 
   company: {
-    legalName: "[DOLDUR] Ticaret Unvanı / Ad Soyad",
+    legalName: "Emrah İpek",
     tradeName: "Sportifly",
-    mersis: "[DOLDUR] MERSİS No (tacir) ",
-    taxId: "[DOLDUR] Vergi Kimlik No",
-    taxOffice: "[DOLDUR] Vergi Dairesi",
-    address: "[DOLDUR] Merkez adresi, İlçe / İl",
-    kep: "[DOLDUR]@hs01.kep.tr",
-    email: "info@sportifly.app", // [DOLDUR]
-    phone: "+90 5XX XXX XX XX", // [DOLDUR]
-    chamber: "[DOLDUR] Bağlı olunan meslek odası",
-    chamberUrl: "https://www.tobb.org.tr/", // [DOLDUR] meslek kuralları bağlantısı
+    kind: "Şahıs işletmesi",
+    address: "Kocaeli / Darıca, Fevzi Çakmak Mahallesi, Ayan Sokak No: 3",
+    email: "destek@sportifly.app",
+    phone: "+90 546 152 92 18",
   },
 
   /** İyzico'nun istediği "ürün ve fiyat bilgisi" bölümü için hizmet listesi. */

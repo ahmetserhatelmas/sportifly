@@ -4,7 +4,7 @@ import { site } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: "İletişim",
-  description: "Sportifly iletişim bilgileri: ticaret unvanı, MERSİS/vergi numarası, adres, KEP, e-posta ve telefon.",
+  description: "Sportifly iletişim bilgileri: unvan, adres, e-posta ve telefon.",
 };
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
@@ -30,7 +30,9 @@ export default function ContactPage() {
         >
           <div className="text-sm font-semibold text-brand-dark">Destek</div>
           <div className="mt-1 text-lg font-bold text-ink">{site.supportEmail}</div>
-          <p className="mt-2 text-sm text-ink-2">Uygulama, hesap, ödeme ve iade talepleri. Hafta içi 09:00–18:00 içinde yanıtlanır.</p>
+          <p className="mt-2 text-sm text-ink-2">
+            Uygulama, hesap, ödeme ve iade talepleri. Hafta içi 09:00–18:00 içinde yanıtlanır.
+          </p>
         </a>
         <a
           href={`tel:${c.phone.replace(/\s/g, "")}`}
@@ -47,25 +49,19 @@ export default function ContactPage() {
         6563 sayılı Elektronik Ticaretin Düzenlenmesi Hakkında Kanun ve ilgili yönetmelik gereği bilgilendirme.
       </p>
       <dl className="mt-4">
-        <Row label="Ticaret unvanı" value={c.legalName} />
+        <Row label="Ad soyad / unvan" value={c.legalName} />
+        <Row label="İşletme türü" value={c.kind} />
         <Row label="İşletme adı / marka" value={c.tradeName} />
-        <Row label="MERSİS no" value={c.mersis} />
-        <Row label="Vergi kimlik no" value={`${c.taxId} — ${c.taxOffice}`} />
         <Row label="Merkez adresi" value={c.address} />
-        <Row label="KEP adresi" value={c.kep} />
-        <Row label="E-posta" value={<a className="underline" href={`mailto:${c.email}`}>{c.email}</a>} />
-        <Row label="Telefon" value={c.phone} />
         <Row
-          label="Meslek odası"
+          label="E-posta"
           value={
-            <>
-              {c.chamber} —{" "}
-              <a className="underline" href={c.chamberUrl} target="_blank" rel="noopener noreferrer">
-                meslekî davranış kuralları
-              </a>
-            </>
+            <a className="underline" href={`mailto:${c.email}`}>
+              {c.email}
+            </a>
           }
         />
+        <Row label="Telefon" value={c.phone} />
       </dl>
     </PageShell>
   );

@@ -12,24 +12,16 @@ npm run dev      # http://localhost:3000
 npm run build    # üretim derlemesi
 ```
 
-## Yayına almadan önce doldurulacaklar
+## Şirket ve yasal metinler
 
-Tüm şirket bilgileri tek dosyada: `lib/site.ts`. `[DOLDUR]` ile işaretli alanlar:
+İletişim bilgileri `lib/site.ts` içinde: Emrah İpek, adres, telefon, `destek@sportifly.app`.
 
-- Ticaret unvanı / ad-soyad, MERSİS (tacir) veya VKN (esnaf), vergi dairesi
-- Merkez adresi, KEP adresi, e-posta, telefon
-- Bağlı olunan meslek odası ve kural bağlantısı
-- `url` (yayın alan adı), destek e-postası, mağaza linkleri
+Yasal metinler `content/legal/*.md` dosyalarından okunur.
 
 Ayrıca:
 
-- `public/payment/` içindeki `iyzico-ile-ode.svg`, `visa.svg`, `mastercard.svg`, `troy.svg`
-  yer tutucudur; iyzico panelinden indirilen resmi logo paketiyle **aynı adlarla** değiştir.
-- Yasal metinler (`app/gizlilik-politikasi`, `app/kullanim-kosullari`,
-  `app/mesafeli-satis-sozlesmesi`, `app/teslimat-ve-iade`, `app/kvkk-aydinlatma-metni`)
-  taslaktır; yayın öncesi hukuk danışmanı kontrolünden geçmeli.
-- `public/screens/*.jpg` emülatörden alınan ekran görüntüleri; istersen gerçek cihaz
-  görüntüleriyle (aynı isim, 9:19.5 dikey) değiştir.
+- `public/payment/` içindeki logolar yer tutucudur; iyzico resmi logo paketiyle değiştirilebilir.
+- `public/screens/*.jpg` uygulama ekran görüntüleridir.
 
 ## Vercel'e deploy
 

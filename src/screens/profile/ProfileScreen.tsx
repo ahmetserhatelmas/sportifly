@@ -337,6 +337,24 @@ export function ProfileScreen() {
                 openScreen(() => navigation.navigate('Legal', { title: 'Gizlilik Politikası' }))
               }
             />
+            <DrawerItem
+              icon="document-text-outline"
+              label="KVKK Aydınlatma Metni"
+              small
+              onPress={() =>
+                openScreen(() => navigation.navigate('Legal', { title: 'KVKK Aydınlatma Metni' }))
+              }
+            />
+            <DrawerItem
+              icon="document-text-outline"
+              label="Teslimat ve İade Şartları"
+              small
+              onPress={() =>
+                openScreen(() =>
+                  navigation.navigate('Legal', { title: 'Teslimat ve İade Şartları' })
+                )
+              }
+            />
             </ScrollView>
           </View>
         </View>

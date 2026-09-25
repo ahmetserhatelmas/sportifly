@@ -20,7 +20,7 @@ Yasal metinler `content/legal/*.md` dosyalarından okunur.
 
 Ayrıca:
 
-- `public/payment/` içindeki logolar yer tutucudur; iyzico resmi logo paketiyle değiştirilebilir.
+- `public/payment/` içinde iyzico resmi logo paketi vardır (footer şeridi + iyzico ile Öde).
 - `public/screens/*.jpg` uygulama ekran görüntüleridir.
 
 ## Vercel'e deploy

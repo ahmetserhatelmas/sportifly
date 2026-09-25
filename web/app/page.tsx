@@ -1,10 +1,12 @@
 import Link from "next/link";
+import { CatalogCard } from "@/components/catalog-card";
 import { HashScroll } from "@/components/hash-scroll";
 import { Icons } from "@/components/icons";
 import { Phone } from "@/components/phone";
 import { PaymentLogos } from "@/components/payment-logos";
 import { Section } from "@/components/section";
 import { StoreBadges } from "@/components/store-badges";
+import { fields, lessons } from "@/lib/catalog";
 import { site } from "@/lib/site";
 
 const features = [
@@ -135,6 +137,41 @@ export default function HomePage() {
         </div>
       </div>
 
+      {/* CATALOG */}
+      <Section
+        id="hizmetler"
+        eyebrow="Satıştaki hizmetler"
+        title="Saha kirala, ders al"
+        lead="Aşağıdaki ilanlar saatlik veya ders başı fiyatıyla satılır. Tutar ilanda Türk Lirası ve KDV dahil yazılır; ödeme iyzico ile alınır."
+      >
+        <div>
+          <div className="mb-5 flex items-end justify-between gap-4">
+            <h3 className="text-xl font-bold text-ink">Saha kiralama</h3>
+            <Link href="/saha-kiralama" className="text-sm font-semibold text-brand-dark">
+              Tüm sahalar →
+            </Link>
+          </div>
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            {fields.slice(0, 3).map((item) => (
+              <CatalogCard key={item.slug} item={item} />
+            ))}
+          </div>
+        </div>
+        <div className="mt-12">
+          <div className="mb-5 flex items-end justify-between gap-4">
+            <h3 className="text-xl font-bold text-ink">Özel ders</h3>
+            <Link href="/ozel-ders" className="text-sm font-semibold text-brand-dark">
+              Tüm dersler →
+            </Link>
+          </div>
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            {lessons.slice(0, 3).map((item) => (
+              <CatalogCard key={item.slug} item={item} />
+            ))}
+          </div>
+        </div>
+      </Section>
+
       {/* FEATURES */}
       <Section
         id="ozellikler"
@@ -245,6 +282,17 @@ export default function HomePage() {
             </div>
           ))}
         </div>
+        <p className="mt-6 text-sm text-ink-2">
+          Güncel ilanlar ve net fiyatlar:{" "}
+          <Link href="/saha-kiralama" className="font-semibold text-brand-dark underline">
+            Saha kiralama
+          </Link>{" "}
+          ve{" "}
+          <Link href="/ozel-ders" className="font-semibold text-brand-dark underline">
+            Özel ders
+          </Link>
+          .
+        </p>
         <div className="mt-8 flex flex-col items-start justify-between gap-5 rounded-2xl bg-brand-soft p-6 md:flex-row md:items-center">
           <div className="flex items-start gap-3">
             <Icons.card className="mt-0.5 shrink-0 text-brand-dark" />

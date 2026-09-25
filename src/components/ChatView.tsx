@@ -134,6 +134,11 @@ export function ChatView({
 
   return (
     <View ref={rootRef} style={{ flex: 1, paddingBottom: lift }} onLayout={onRootLayout}>
+      {data.length === 0 && emptyText ? (
+        <View style={styles.emptyWrap} pointerEvents="none">
+          <Text style={styles.empty}>{emptyText}</Text>
+        </View>
+      ) : null}
       <FlatList
         data={data}
         inverted
@@ -144,9 +149,6 @@ export function ChatView({
         maxToRenderPerBatch={12}
         windowSize={7}
         removeClippedSubviews={Platform.OS === 'android'}
-        ListEmptyComponent={
-          emptyText ? <Text style={styles.empty}>{emptyText}</Text> : null
-        }
         renderItem={renderItem}
       />
 
@@ -289,11 +291,17 @@ function MessageText({
 }
 
 const styles = StyleSheet.create({
+  emptyWrap: {
+    ...StyleSheet.absoluteFill,
+    zIndex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
   empty: {
     textAlign: 'center',
     color: colors.textMuted,
     fontSize: 14,
-    transform: [{ scaleY: -1 }],
   },
   messageRow: {
     flexDirection: 'row',

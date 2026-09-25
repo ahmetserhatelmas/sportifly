@@ -41,8 +41,8 @@ export const site = {
 } as const;
 
 export const nav = [
-  { href: "/#ozellikler", label: "Özellikler" },
-  { href: "/#nasil-calisir", label: "Nasıl çalışır" },
+  { href: "/saha-kiralama", label: "Saha kiralama" },
+  { href: "/ozel-ders", label: "Özel ders" },
   { href: "/#ucretler", label: "Ücretler" },
   { href: "/hakkimizda", label: "Hakkımızda" },
   { href: "/iletisim", label: "İletişim" },

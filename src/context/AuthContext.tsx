@@ -30,6 +30,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const fetchProfile = async (userId: string) => {
     userIdRef.current = userId;
     const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
+    if ((data as Profile | null)?.is_banned) {
+      userIdRef.current = null;
+      setProfile(null);
+      await supabase.auth.signOut();
+      return;
+    }
     setProfile((data as Profile) ?? null);
     void registerPushToken(userId);
   };

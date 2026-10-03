@@ -8,6 +8,7 @@ export type Profile = {
   is_field_owner?: boolean;
   is_instructor?: boolean;
   is_admin?: boolean;
+  is_banned?: boolean;
   expo_push_token?: string | null;
   push_enabled?: boolean;
   created_at: string;

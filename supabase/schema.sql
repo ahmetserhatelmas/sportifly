@@ -16,6 +16,7 @@ create table if not exists public.profiles (
   is_field_owner boolean not null default false,
   is_instructor boolean not null default false,
   is_admin boolean not null default false,
+  is_banned boolean not null default false,
   expo_push_token text,
   push_enabled boolean not null default true,
   created_at timestamptz not null default now()
@@ -25,6 +26,7 @@ create table if not exists public.profiles (
 alter table public.profiles add column if not exists is_field_owner boolean not null default false;
 alter table public.profiles add column if not exists is_instructor boolean not null default false;
 alter table public.profiles add column if not exists is_admin boolean not null default false;
+alter table public.profiles add column if not exists is_banned boolean not null default false;
 alter table public.profiles add column if not exists push_enabled boolean not null default true;
 
 alter table public.profiles enable row level security;
@@ -47,7 +49,8 @@ begin
   if auth.uid() is not null and auth.uid() = new.id then
     if new.is_field_owner is distinct from old.is_field_owner
        or new.is_instructor is distinct from old.is_instructor
-       or new.is_admin is distinct from old.is_admin then
+       or new.is_admin is distinct from old.is_admin
+       or new.is_banned is distinct from old.is_banned then
       raise exception 'Rol alanları yalnızca yönetici tarafından değiştirilebilir';
     end if;
   end if;

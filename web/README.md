@@ -23,6 +23,15 @@ Ayrıca:
 - `public/payment/` içinde iyzico resmi logo paketi vardır (footer şeridi + iyzico ile Öde).
 - `public/screens/*.jpg` uygulama ekran görüntüleridir.
 
+## Admin paneli
+
+`/admin/login` — uygulamada `is_admin = true` olan hesapla giriş.
+
+Vercel'de `EXPO_PUBLIC_SUPABASE_URL` ve `EXPO_PUBLIC_SUPABASE_ANON_KEY` yeter
+(aynı değerler `NEXT_PUBLIC_*` adıyla da olabilir).
+
+Supabase SQL Editor'da `supabase/migrations/31_admin_web.sql` dosyasını bir kez çalıştır.
+
 ## Vercel'e deploy
 
 Repo kökü Expo projesi olduğu için Vercel'de **Root Directory = `web`** seç.

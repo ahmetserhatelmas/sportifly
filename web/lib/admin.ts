@@ -27,7 +27,13 @@ export type AdminUser = {
 export const PAGE_SIZE = 40;
 
 export async function requireAdmin() {
-  const supabase = await createServerSupabase();
+  let supabase;
+  try {
+    supabase = await createServerSupabase();
+  } catch {
+    redirect("/admin/login?error=yapilandirma");
+  }
+
   const {
     data: { user },
   } = await supabase.auth.getUser();

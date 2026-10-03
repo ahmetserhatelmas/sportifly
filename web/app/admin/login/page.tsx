@@ -20,7 +20,13 @@ export default async function AdminLoginPage({
           Uygulamada admin olan hesabın e-posta ve şifresiyle gir.
         </p>
         <LoginForm
-          initialError={error === "yetkisiz" ? "Bu hesap admin değil." : undefined}
+          initialError={
+            error === "yetkisiz"
+              ? "Bu hesap admin değil."
+              : error === "yapilandirma"
+                ? "Sunucu Supabase ayarını göremiyor."
+                : undefined
+          }
         />
       </div>
     </div>

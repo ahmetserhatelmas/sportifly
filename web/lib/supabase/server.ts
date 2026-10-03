@@ -1,8 +1,12 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
-import { publicSupabaseKey, publicSupabaseUrl } from "@/lib/env";
+import { hasPublicSupabaseEnv, publicSupabaseKey, publicSupabaseUrl } from "@/lib/env";
 
 export async function createServerSupabase() {
+  if (!hasPublicSupabaseEnv()) {
+    throw new Error("Supabase ortam değişkenleri eksik");
+  }
+
   const cookieStore = await cookies();
 
   return createServerClient(publicSupabaseUrl(), publicSupabaseKey(), {
